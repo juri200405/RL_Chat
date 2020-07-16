@@ -1,0 +1,6 @@
+contents/data/*
+contents/.*
+!contents/data/.gitkeep
+
+.env
+__pycache__

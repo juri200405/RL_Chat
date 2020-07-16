@@ -1,0 +1,27 @@
+version: "2.4"
+
+services:
+        tomioka_chat:
+                image: tomioka_chat
+                user: ${U_ID}:${G_ID}
+                build:
+                        context: dockers/
+                        args:
+                                - HTTP_PROXY
+                                - HTTPS_PROXY
+                                - http_proxy
+                                - https_proxy
+                                - USER_NAME=${USER_NAME}
+                                - U_ID=${U_ID}
+                                - G_ID=${G_ID}
+                                - HOME_DIR=${HOME_DIR}
+                shm_size: 4G
+                volumes:
+                        - ./contents:${HOME}/contents
+                runtime: nvidia
+                env_file: .env
+                ports:
+                        - "31096:31096"
+                working_dir: ${HOME}/contents
+                command: /bin/bash
+                tty: true
