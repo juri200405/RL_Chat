@@ -19,10 +19,10 @@ from transformers import BertModel
 
 from bert_data import txt_to_idlist
 from bert_dataloader import get_dataloader
-from encoder_decoder import Bert_Encoder_gru, transformer_Decoder
+from encoder_decoder import Bert_Encoder_gru, Bert_Encoder_vae, transformer_Decoder
 
 
-def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, n_vocab, encoder_device, decoder_device, writer, epoch):
+def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, n_vocab, encoder_device, decoder_device, writer, epoch, vae=False):
     encoder.train()
     decoder.train()
     losses = []
@@ -41,13 +41,20 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         label = label.to(decoder_device)
         tgt_padding_mask = tgt_padding_mask.to(decoder_device)
 
-        memory = encoder(inputs, attention_mask=inp_padding_mask)
+        if vae:
+            mean, logv, memory = encoder(inputs, attention_mask=inp_padding_mask)
+        else:
+            memory = encoder(inputs, attention_mask=inp_padding_mask)
         memory = memory.to(decoder_device)
         out = decoder(tgt, memory, tgt_padding_mask=tgt_padding_mask)
 
         out = out[:-1].contiguous().view(-1, out.shape[-1])
         label = label.transpose(0,1).contiguous().view(-1)
-        loss = loss_func(out, label)
+        
+        if vae:
+            loss, cross_entropy, kl_loss = loss_func(out, label, mean, logv)
+        else:
+            loss = loss_func(out, label)
 
         encoder_opt.zero_grad()
         decoder_opt.zero_grad()
@@ -58,16 +65,23 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         losses.append(loss.item())
         train_itr.set_postfix({"loss":loss.item()})
         writer.add_scalar('Loss/each',loss.item(), epoch * len(train_itr) + n)
+        if vae:
+            writer.add_scalar('Detail_Loss/cross_entropy', cross_entropy.item(), epoch * len(train_itr) + n)
+            writer.add_scalar('Detail_Loss/kl_loss', kl_loss.item(), epoch * len(train_itr) + n)
+
         n += 1
     return np.mean(losses)
 
-def test(encoder, decoder, test_data, loss_func, n_vocab, encoder_device, decoder_device, max_length=128):
+def test(encoder, decoder, test_data, loss_func, n_vocab, encoder_device, decoder_device, max_length=128, vae=False):
     encoder.eval()
     decoder.eval()
     data = random.choice(test_data)
 
     input_s = torch.tensor([1] + data + [2], device=encoder_device).unsqueeze(0)
-    memory = encoder(input_s)
+    if vae:
+        _, _, memory = encoder(input_s)
+    else:
+        memory = encoder(input_s)
     memory = memory.to(decoder_device)
 
     tgt = torch.full((1, max_length), 0, dtype=torch.long, device=encoder_device)
@@ -86,6 +100,17 @@ def test(encoder, decoder, test_data, loss_func, n_vocab, encoder_device, decode
         else:
             t_word = next_word
     return data, ids
+
+def get_vae_loss(label_loss_func, decoder_device, batch_size):
+    label_loss_func = label_loss_func
+    def _f(out, label, logv, mean):
+        logv = logv.to(decoder_device)
+        mean = mean.to(decoder_device)
+        closs_entropy_loss = label_loss_func(out, label)
+        KL_loss = -0.5 * torch.sum(1 + logv - mean.pow(2) - logv.exp())
+        return (closs_entropy_loss + KL_loss) / batch_size, closs_entropy_loss, KL_loss
+    return _f
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -144,6 +169,12 @@ if __name__ == "__main__":
 
     if model_type == "gru":
         encoder = Bert_Encoder_gru(args.bert_path)
+        loss_func = nn.CrossEntropyLoss(ignore_index=3)
+        vae = False
+    elif model_type == "vae":
+        encoder = Bert_Encoder_vae(args.bert_path)
+        loss_func = get_vae_loss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), decoder_device, batch_size)
+        vae = True
     else:
         print("model_type missmatch")
         exit()
@@ -166,7 +197,6 @@ if __name__ == "__main__":
     decoder = decoder.to(decoder_device)
     encoder = encoder.to(encoder_device)
 
-    loss_func = nn.CrossEntropyLoss(ignore_index=3)
 
     if optim_type == "Adam":
         encoder_opt = optim.Adam(encoder.parameters())
@@ -199,11 +229,11 @@ if __name__ == "__main__":
 
     t_itr = tqdm.trange(200, leave=False)
     for epoch in t_itr:
-        train_loss = train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, n_vocab, encoder_device, decoder_device, writer, epoch)
+        train_loss = train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, n_vocab, encoder_device, decoder_device, writer, epoch, vae)
         t_itr.set_postfix({"ave_loss":train_loss})
         writer.add_scalar('Loss/average', train_loss, epoch)
 
-        input_data, output_data = test(encoder, decoder, train_dataset, loss_func, n_vocab, encoder_device, decoder_device)
+        input_data, output_data = test(encoder, decoder, train_dataset, loss_func, n_vocab, encoder_device, decoder_device, vae=vae)
         output_text = "{}\n{}\n-> {}\n   {}".format(sp.decode(input_data), input_data, sp.decode(output_data), output_data)
         t_itr.write(output_text)
         writer.add_text("output_text", output_text, epoch)

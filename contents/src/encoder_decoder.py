@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributions import MultivariateNormal
 
 from transformers import BertModel
 
@@ -22,6 +23,29 @@ class Bert_Encoder_gru(nn.Module):
         _, memory = self.gru(bert_output, hidden)
         return memory # (1, batch, d_model)
 
+class Bert_Encoder_vae(nn.Module):
+    def __init__(self, bert_path):
+        super(Bert_Encoder_vae, self).__init__()
+
+        self.bert = BertModel.from_pretrained(bert_path)
+        hidden_size = self.bert.config.hidden_size
+        self.gru = nn.GRU(input_size=hidden_size, hidden_size=hidden_size, batch_first=True)
+        self.memory2mean = nn.Linear(hidden_size, hidden_size)
+        self.memory2logv = nn.Linear(hidden_size, hidden_size)
+
+    def forward(self, src, attention_mask=None):
+        with torch.no_grad():
+            bert_output = self.bert(src, attention_mask=attention_mask)
+            bert_output = bert_output[0]
+        # bertの最終隠れ層を、GRUで合成したものを出力
+        hidden = torch.zeros(1, bert_output.size()[0], self.gru.hidden_size, device=bert_output.device)
+        _, memory = self.gru(bert_output, hidden)
+        mean = self.memory2mean(memory)
+        logv = self.memory2logv(memory)
+
+        m = MultivariateNormal(mean, torch.diag_embed(logv.exp()))
+        z = m.rsample()
+        return mean, logv, z # (1, batch, d_model)
 
 class transformer_Decoder(nn.Module):
     def __init__(self, n_vocab, d_model, n_head, n_hidden, n_layers, embedding, norm=None, dropout=0.1):
