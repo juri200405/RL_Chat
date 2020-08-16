@@ -46,13 +46,16 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         else:
             memory = encoder(inputs, attention_mask=inp_padding_mask)
         memory = memory.to(decoder_device)
-        out = decoder(tgt, memory, tgt_padding_mask=tgt_padding_mask)
+        z_out = decoder(tgt, memory, tgt_padding_mask=tgt_padding_mask)
+        mean = mean.to(decoder_device)
+        mean_out = decoder(tgt, mean, tgt_padding_mask=tgt_padding_mask)
 
-        out = out[:-1].contiguous().view(-1, out.shape[-1])
+        z_out = z_out[:-1].contiguous().view(-1, z_out.shape[-1])
+        mean_out = mean_out[:-1].contiguous().view(-1, mean_out.shape[-1])
         label = label.transpose(0,1).contiguous().view(-1)
         
         if vae:
-            loss, cross_entropy, kl_loss = loss_func(out, label, mean, logv)
+            loss, z_cross_entropy, mean_cross_entropy, kl_loss = loss_func(z_out, mean_out, label, mean, logv)
         else:
             loss = loss_func(out, label)
 
@@ -66,7 +69,8 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         train_itr.set_postfix({"loss":loss.item()})
         writer.add_scalar('Loss/each',loss.item(), epoch * len(train_itr) + n)
         if vae:
-            writer.add_scalar('Detail_Loss/cross_entropy', cross_entropy.item(), epoch * len(train_itr) + n)
+            writer.add_scalar('Detail_Loss/z_cross_entropy', z_cross_entropy.item(), epoch * len(train_itr) + n)
+            writer.add_scalar('Detail_Loss/mean_cross_entropy', mean_cross_entropy.item(), epoch * len(train_itr) + n)
             writer.add_scalar('Detail_Loss/kl_loss', kl_loss.item(), epoch * len(train_itr) + n)
 
         n += 1
@@ -103,12 +107,13 @@ def test(encoder, decoder, test_data, loss_func, n_vocab, encoder_device, decode
 
 def get_vae_loss(label_loss_func, decoder_device, batch_size):
     label_loss_func = label_loss_func
-    def _f(out, label, logv, mean):
+    def _f(z_out, mean_out, label, logv, mean):
         logv = logv.to(decoder_device)
         mean = mean.to(decoder_device)
-        closs_entropy_loss = label_loss_func(out, label)
+        z_closs_entropy_loss = label_loss_func(z_out, label)
+        mean_closs_entropy_loss = label_loss_func(mean_out, label)
         KL_loss = -0.5 * torch.sum(1 + logv - mean.pow(2) - logv.exp())
-        return (closs_entropy_loss + KL_loss) / batch_size, closs_entropy_loss, KL_loss
+        return (z_closs_entropy_loss + mean_closs_entropy_loss + KL_loss) / batch_size, z_closs_entropy_loss, mean_closs_entropy_loss, KL_loss
     return _f
 
 
