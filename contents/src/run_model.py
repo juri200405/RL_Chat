@@ -52,7 +52,7 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         label = label.transpose(0,1).contiguous().view(-1)
         
         if vae:
-            loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, mean, logv, epoch * len(train_itr), 200 * len(train_itr))
+            loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, mean, logv, epoch * len(train_itr) + n, 200 * len(train_itr))
         else:
             loss = loss_func(out, label)
 
@@ -68,6 +68,7 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         if vae:
             writer.add_scalar('Detail_Loss/cross_entropy', cross_entropy.item(), epoch * len(train_itr) + n)
             writer.add_scalar('Detail_Loss/kl_loss', kl_loss.item(), epoch * len(train_itr) + n)
+            writer.add_scalar('Detail_Loss/kl_loss', kl_weight.item(), epoch * len(train_itr) + n)
 
         n += 1
     return np.mean(losses)
