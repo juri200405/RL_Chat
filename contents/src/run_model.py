@@ -52,7 +52,7 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         label = label.transpose(0,1).contiguous().view(-1)
         
         if vae:
-            loss, cross_entropy, kl_loss = loss_func(out, label, mean, logv)
+            loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, mean, logv, epoch * len(train_itr), 200 * len(train_itr))
         else:
             loss = loss_func(out, label)
 
@@ -101,14 +101,18 @@ def test(encoder, decoder, test_data, loss_func, n_vocab, encoder_device, decode
             t_word = next_word
     return data, ids
 
+def anneal_function(step, x0, k=0.025):
+    return float(1/(1+np.exp(-k*(step-x0))))
+
 def get_vae_loss(label_loss_func, decoder_device, batch_size):
     label_loss_func = label_loss_func
-    def _f(out, label, logv, mean):
+    def _f(out, label, logv, mean, step, x0):
         logv = logv.to(decoder_device)
         mean = mean.to(decoder_device)
         closs_entropy_loss = label_loss_func(out, label)
         KL_loss = -0.5 * torch.sum(1 + logv - mean.pow(2) - logv.exp())
-        return (closs_entropy_loss + KL_loss) / batch_size, closs_entropy_loss, KL_loss
+        KL_weight = anneal_function(step, x0)
+        return (closs_entropy_loss + KL_weight * KL_loss) / batch_size, closs_entropy_loss, KL_loss, KL_weight
     return _f
 
 
@@ -227,7 +231,7 @@ if __name__ == "__main__":
 
     writer = SummaryWriter(log_dir=args.output_dir)
 
-    t_itr = tqdm.trange(200, leave=False)
+    t_itr = tqdm.trange(400, leave=False)
     for epoch in t_itr:
         train_loss = train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, n_vocab, encoder_device, decoder_device, writer, epoch, vae)
         t_itr.set_postfix({"ave_loss":train_loss})
