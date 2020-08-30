@@ -2,6 +2,9 @@ import argparse
 from pathlib import Path
 import random
 import json
+from itertools import chain
+import sys
+import decimal
 
 import torch
 import torch.nn as nn
@@ -52,7 +55,7 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         label = label.transpose(0,1).contiguous().view(-1)
         
         if vae:
-            loss, cross_entropy, kl_loss = loss_func(out, label, mean, logv)
+            loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, mean, logv, epoch * len(train_itr) + n, 200 * len(train_itr))
         else:
             loss = loss_func(out, label)
 
@@ -63,11 +66,12 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         decoder_opt.step()
 
         losses.append(loss.item())
-        train_itr.set_postfix({"loss":loss.item()})
+        train_itr.set_postfix({"loss":loss.item(), "weight":kl_weight})
         writer.add_scalar('Loss/each',loss.item(), epoch * len(train_itr) + n)
         if vae:
             writer.add_scalar('Detail_Loss/cross_entropy', cross_entropy.item(), epoch * len(train_itr) + n)
             writer.add_scalar('Detail_Loss/kl_loss', kl_loss.item(), epoch * len(train_itr) + n)
+            writer.add_scalar('Detail_Loss/kl_weight', kl_weight, epoch * len(train_itr) + n)
 
         n += 1
     return np.mean(losses)
@@ -101,14 +105,22 @@ def test(encoder, decoder, test_data, loss_func, n_vocab, encoder_device, decode
             t_word = next_word
     return data, ids
 
+def anneal_function(step, x0, k=0.000015):
+    tmp = 1/(1+decimal.Decimal(-k*(step-x0)).exp())
+    # print("tmp:{}, < min:{}, step:{}, x0:{}".format(tmp, tmp<sys.float_info.min, step, x0))
+    if tmp < sys.float_info.min:
+        tmp = sys.float_info.min
+    return float(tmp)
+
 def get_vae_loss(label_loss_func, decoder_device, batch_size):
     label_loss_func = label_loss_func
-    def _f(out, label, logv, mean):
+    def _f(out, label, logv, mean, step, x0):
         logv = logv.to(decoder_device)
         mean = mean.to(decoder_device)
         closs_entropy_loss = label_loss_func(out, label)
         KL_loss = -0.5 * torch.sum(1 + logv - mean.pow(2) - logv.exp())
-        return (closs_entropy_loss + KL_loss) / batch_size, closs_entropy_loss, KL_loss
+        KL_weight = anneal_function(step, x0)
+        return (closs_entropy_loss + KL_weight * KL_loss) / batch_size, closs_entropy_loss, KL_loss, KL_weight
     return _f
 
 
@@ -227,7 +239,7 @@ if __name__ == "__main__":
 
     writer = SummaryWriter(log_dir=args.output_dir)
 
-    t_itr = tqdm.trange(200, leave=False)
+    t_itr = tqdm.trange(400, leave=False)
     for epoch in t_itr:
         train_loss = train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, n_vocab, encoder_device, decoder_device, writer, epoch, vae)
         t_itr.set_postfix({"ave_loss":train_loss})
