@@ -2,6 +2,9 @@ import argparse
 from pathlib import Path
 import random
 import json
+from itertools import chain
+import sys
+import decimal
 
 import torch
 import torch.nn as nn
@@ -63,12 +66,12 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         decoder_opt.step()
 
         losses.append(loss.item())
-        train_itr.set_postfix({"loss":loss.item()})
+        train_itr.set_postfix({"loss":loss.item(), "weight":kl_weight})
         writer.add_scalar('Loss/each',loss.item(), epoch * len(train_itr) + n)
         if vae:
             writer.add_scalar('Detail_Loss/cross_entropy', cross_entropy.item(), epoch * len(train_itr) + n)
             writer.add_scalar('Detail_Loss/kl_loss', kl_loss.item(), epoch * len(train_itr) + n)
-            writer.add_scalar('Detail_Loss/kl_loss', kl_weight.item(), epoch * len(train_itr) + n)
+            writer.add_scalar('Detail_Loss/kl_weight', kl_weight, epoch * len(train_itr) + n)
 
         n += 1
     return np.mean(losses)
@@ -102,8 +105,12 @@ def test(encoder, decoder, test_data, loss_func, n_vocab, encoder_device, decode
             t_word = next_word
     return data, ids
 
-def anneal_function(step, x0, k=0.025):
-    return float(1/(1+np.exp(-k*(step-x0))))
+def anneal_function(step, x0, k=0.000015):
+    tmp = 1/(1+decimal.Decimal(-k*(step-x0)).exp())
+    # print("tmp:{}, < min:{}, step:{}, x0:{}".format(tmp, tmp<sys.float_info.min, step, x0))
+    if tmp < sys.float_info.min:
+        tmp = sys.float_info.min
+    return float(tmp)
 
 def get_vae_loss(label_loss_func, decoder_device, batch_size):
     label_loss_func = label_loss_func
