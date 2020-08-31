@@ -17,8 +17,11 @@ dependencies:
   - regex
   - pyparsing
   - packaging
+  - cython
+  - portalocker
   - pip:
     - sentencepiece
     - python-telegram-bot
     - transformers
     - torch_optimizer
+    - "--editable=git+https://github.com/pytorch/fairseq.git#egg=fairseq"
