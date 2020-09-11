@@ -105,7 +105,7 @@ def test(encoder, decoder, test_data, loss_func, n_vocab, encoder_device, decode
             t_word = next_word
     return data, ids
 
-def anneal_function(step, x0, k=0.000015):
+def anneal_function(step, x0, k=0.00002):
     tmp = 1/(1+decimal.Decimal(-k*(step-x0)).exp())
     # print("tmp:{}, < min:{}, step:{}, x0:{}".format(tmp, tmp<sys.float_info.min, step, x0))
     if tmp < sys.float_info.min:
@@ -239,7 +239,7 @@ if __name__ == "__main__":
 
     writer = SummaryWriter(log_dir=args.output_dir)
 
-    t_itr = tqdm.trange(400, leave=False)
+    t_itr = tqdm.trange(200, leave=False)
     for epoch in t_itr:
         train_loss = train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, n_vocab, encoder_device, decoder_device, writer, epoch, vae)
         t_itr.set_postfix({"ave_loss":train_loss})
