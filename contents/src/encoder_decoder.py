@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -5,6 +7,31 @@ from torch.distributions import MultivariateNormal
 
 from transformers import BertModel
 
+
+class Transformer_Embedding(nn.Module):
+    def __init__(self, n_vocab, d_model, dropout, max_len):
+        super(Transformer_Embedding, self).__init__()
+
+        self.embedding = nn.Embedding(n_vocab, d_model)
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        # x : (seq_len, batch_size)
+
+        x = self.embedding(x)
+        # x : (seq_len, batch_size, d_model)
+
+        x = x + self.pe[:x.size(0), :]
+        # x : (seq_len, batch_size, d_model)
+        return self.dropout(x)
 
 class Bert_Encoder_gru(nn.Module):
     def __init__(self, bert_path):
@@ -46,6 +73,32 @@ class Bert_Encoder_vae(nn.Module):
         m = MultivariateNormal(mean, torch.diag_embed(logv.exp()))
         z = m.rsample()
         return mean, logv, z # (1, batch, d_model)
+
+class transformer_Encoder(nn.Module):
+    def __init__(self, n_vocab, d_model, n_head, n_hidden, n_layers, embedding, norm=None, dropout=0.1):
+        super(transformer_Encoder, self).__init__()
+        self.embedding = embedding
+        self.transformer_encoder = nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model, n_head, n_hidden, dropout), n_layers, norm)
+        
+        self.memory2mean = nn.Linear(d_model, d_model)
+        self.memory2logv = nn.Linear(d_model, d_model)
+
+    def forward(self, src, attention_mask=None):
+        # src : (batch_size, seq_len)
+
+        src = self.embedding(src).transpose(0,1)
+        # src : (seq_len, batch_size, d_model)
+
+        attention_mask = attention_mask.byte()
+        memory = self.transformer_encoder(src, src_key_padding_mask=attention_mask)
+        # memory = (seq_len, batch_size, d_model)
+
+        mean = self.memory2mean(memory)
+        logv = self.memory2logv(memory)
+
+        m = MultivariateNormal(mean, torch.diag_embed(logv.exp()))
+        z = m.rsample()
+        return mean, logv, z
 
 class transformer_Decoder(nn.Module):
     def __init__(self, n_vocab, d_model, n_head, n_hidden, n_layers, embedding, norm=None, dropout=0.1):

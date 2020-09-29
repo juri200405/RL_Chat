@@ -22,7 +22,7 @@ from transformers import BertModel
 
 from bert_data import txt_to_idlist
 from bert_dataloader import get_dataloader
-from encoder_decoder import Bert_Encoder_gru, Bert_Encoder_vae, transformer_Decoder
+from encoder_decoder import Bert_Encoder_gru, Bert_Encoder_vae, transformer_Decoder, Transformer_Embedding, transformer_Encoder
 
 
 def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, n_vocab, encoder_device, decoder_device, writer, epoch, vae=False):
@@ -105,7 +105,7 @@ def test(encoder, decoder, test_data, loss_func, n_vocab, encoder_device, decode
             t_word = next_word
     return data, ids
 
-def anneal_function(step, x0, k=0.00002):
+def anneal_function(step, x0, k=0.000015):
     tmp = 1/(1+decimal.Decimal(-k*(step-x0)).exp())
     # print("tmp:{}, < min:{}, step:{}, x0:{}".format(tmp, tmp<sys.float_info.min, step, x0))
     if tmp < sys.float_info.min:
@@ -138,9 +138,10 @@ if __name__ == "__main__":
     with open(args.hyper_param, 'rt') as f:
         hyperp = json.load(f)
 
-    # n_vocab = hyperp["n_vocab"]
-    # d_model = hyperp["d_model"]
+    n_vocab = hyperp["n_vocab"]
+    d_model = hyperp["d_model"]
     n_hidden = hyperp["n_hidden"]
+    encoder_nlayers = hyperp["encoder_nlayers"]
     decoder_nlayers = hyperp["decoder_nlayers"]
     n_head = hyperp["n_head"]
     dropout = hyperp["dropout"]
@@ -148,6 +149,7 @@ if __name__ == "__main__":
     model_type = hyperp["model_type"]
     batch_size = hyperp["batch_size"]
     optim_type = hyperp["optim_type"]
+    max_len = hyperp["max_len"]
 
     # available_cuda = torch.cuda.is_available()
     # encoder_device = decoder_device = torch.device('cuda' if (use_cuda and available_cuda) else 'cpu')
@@ -183,15 +185,24 @@ if __name__ == "__main__":
         encoder = Bert_Encoder_gru(args.bert_path)
         loss_func = nn.CrossEntropyLoss(ignore_index=3)
         vae = False
+        n_vocab = encoder.bert.config.vocab_size
+        d_model = encoder.bert.config.hidden_size
+        embedding_model = encoder.bert.get_input_embeddings()
     elif model_type == "vae":
         encoder = Bert_Encoder_vae(args.bert_path)
+        loss_func = get_vae_loss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), decoder_device, batch_size)
+        vae = True
+        n_vocab = encoder.bert.config.vocab_size
+        d_model = encoder.bert.config.hidden_size
+        embedding_model = encoder.bert.get_input_embeddings()
+    elif model_type == "transformer_vae":
+        embedding_model = Transformer_Embedding(n_vocab, d_model, dropout, max_len)
+        encoder = transformer_Encoder(n_vocab, d_model, n_head, n_hidden, encoder_nlayers, embedding_model, nn.LayerNorm(d_model), dropout=dropout)
         loss_func = get_vae_loss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), decoder_device, batch_size)
         vae = True
     else:
         print("model_type missmatch")
         exit()
-    n_vocab = encoder.bert.config.vocab_size
-    d_model = encoder.bert.config.hidden_size
 
 
     hyperp["n_vocab"] = n_vocab
@@ -203,7 +214,7 @@ if __name__ == "__main__":
     with open(str(Path(args.output_dir) / "hyper_param.json"), 'wt') as f:
         json.dump(hyperp, f)
 
-    decoder = transformer_Decoder(n_vocab, d_model, n_head, n_hidden, decoder_nlayers, encoder.bert.get_input_embeddings(), nn.LayerNorm(d_model), dropout=dropout)
+    decoder = transformer_Decoder(n_vocab, d_model, n_head, n_hidden, decoder_nlayers, embedding_model, nn.LayerNorm(d_model), dropout=dropout)
 
     # encoderのBERT内に組み込まれてる BertEmbeddings をdecoderで使うため、GPUへ送る順番は decoder->encoder
     decoder = decoder.to(decoder_device)
