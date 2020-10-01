@@ -19,13 +19,14 @@ import tqdm
 import sentencepiece as spm
 
 from transformers import BertModel
+from torchviz import make_dot
 
 from bert_data import txt_to_idlist
 from bert_dataloader import get_dataloader
 from encoder_decoder import Bert_Encoder_gru, Bert_Encoder_vae, transformer_Decoder, Transformer_Embedding, transformer_Encoder
 
 
-def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, n_vocab, encoder_device, decoder_device, writer, epoch, vae=False):
+def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, n_vocab, encoder_device, decoder_device, writer, epoch, vae=False, output_dir=Path("")):
     encoder.train()
     decoder.train()
     losses = []
@@ -50,6 +51,7 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
             memory = encoder(inputs, attention_mask=inp_padding_mask)
         memory = memory.to(decoder_device)
         out = decoder(tgt, memory, tgt_padding_mask=tgt_padding_mask)
+        # make_dot(out).render(str(output_dir + "graph"))
 
         out = out[:-1].contiguous().view(-1, out.shape[-1])
         label = label.transpose(0,1).contiguous().view(-1)
@@ -134,11 +136,13 @@ if __name__ == "__main__":
     parser.add_argument("--pt_file")
     args = parser.parse_args()
 
+    sp = spm.SentencePieceProcessor(model_file=args.spm_model)
 
     with open(args.hyper_param, 'rt') as f:
         hyperp = json.load(f)
 
-    n_vocab = hyperp["n_vocab"]
+    # n_vocab = hyperp["n_vocab"]
+    n_vocab = len(sp)
     d_model = hyperp["d_model"]
     n_hidden = hyperp["n_hidden"]
     encoder_nlayers = hyperp["encoder_nlayers"]
@@ -169,7 +173,7 @@ if __name__ == "__main__":
             device_name = "cpu"
     elif len(use_gpus) == 1:
         if device_num >= 1:
-            encoder_device = decoder_device = torch.device('cuda', usegpus[0])
+            encoder_device = decoder_device = torch.device('cuda', use_gpus[0])
             device_name = "cuda"
         else:
             encoder_device = decoder_device = torch.device('cpu')
@@ -196,8 +200,9 @@ if __name__ == "__main__":
         d_model = encoder.bert.config.hidden_size
         embedding_model = encoder.bert.get_input_embeddings()
     elif model_type == "transformer_vae":
-        embedding_model = Transformer_Embedding(n_vocab, d_model, dropout, max_len)
-        encoder = transformer_Encoder(n_vocab, d_model, n_head, n_hidden, encoder_nlayers, embedding_model, nn.LayerNorm(d_model), dropout=dropout)
+        # embedding_model = Transformer_Embedding(n_vocab, d_model, dropout, max_len)
+        # encoder = transformer_Encoder(n_vocab, d_model, n_head, n_hidden, encoder_nlayers, embedding_model, nn.LayerNorm(d_model), dropout=dropout)
+        encoder = transformer_Encoder(n_vocab, d_model, n_head, n_hidden, encoder_nlayers, Transformer_Embedding(n_vocab, d_model, dropout, max_len), nn.LayerNorm(d_model), dropout=dropout)
         loss_func = get_vae_loss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), decoder_device, batch_size)
         vae = True
     else:
@@ -214,7 +219,8 @@ if __name__ == "__main__":
     with open(str(Path(args.output_dir) / "hyper_param.json"), 'wt') as f:
         json.dump(hyperp, f)
 
-    decoder = transformer_Decoder(n_vocab, d_model, n_head, n_hidden, decoder_nlayers, embedding_model, nn.LayerNorm(d_model), dropout=dropout)
+    # decoder = transformer_Decoder(n_vocab, d_model, n_head, n_hidden, decoder_nlayers, embedding_model, nn.LayerNorm(d_model), dropout=dropout)
+    decoder = transformer_Decoder(n_vocab, d_model, n_head, n_hidden, decoder_nlayers, Transformer_Embedding(n_vocab, d_model, dropout, max_len), nn.LayerNorm(d_model), dropout=dropout)
 
     # encoderのBERT内に組み込まれてる BertEmbeddings をdecoderで使うため、GPUへ送る順番は decoder->encoder
     decoder = decoder.to(decoder_device)
@@ -244,7 +250,6 @@ if __name__ == "__main__":
     else:
         true_epoch = 0
 
-    sp = spm.SentencePieceProcessor(model_file=args.spm_model)
     train_dataset = txt_to_idlist(sp, args.input_file, 3)
     train_dataloader = get_dataloader(train_dataset, batch_size, pad_index=3, bos_index=1, eos_index=2)
 
@@ -252,7 +257,7 @@ if __name__ == "__main__":
 
     t_itr = tqdm.trange(200, leave=False)
     for epoch in t_itr:
-        train_loss = train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, n_vocab, encoder_device, decoder_device, writer, epoch, vae)
+        train_loss = train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, n_vocab, encoder_device, decoder_device, writer, epoch, vae, args.output_dir)
         t_itr.set_postfix({"ave_loss":train_loss})
         writer.add_scalar('Loss/average', train_loss, epoch)
 

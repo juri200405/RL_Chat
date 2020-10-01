@@ -65,7 +65,7 @@ class Bert_Encoder_vae(nn.Module):
             bert_output = self.bert(src, attention_mask=attention_mask)
             bert_output = bert_output[0]
         # bertの最終隠れ層を、GRUで合成したものを出力
-        hidden = torch.zeros(1, bert_output.size()[0], self.gru.hidden_size, device=bert_output.device)
+        hidden = torch.zeros(1, bert_output.shape[0], self.gru.hidden_size, device=bert_output.device)
         _, memory = self.gru(bert_output, hidden)
         mean = self.memory2mean(memory)
         logv = self.memory2logv(memory)
@@ -80,18 +80,24 @@ class transformer_Encoder(nn.Module):
         self.embedding = embedding
         self.transformer_encoder = nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model, n_head, n_hidden, dropout), n_layers, norm)
         
+        self.gru = nn.GRU(input_size=d_model, hidden_size=d_model, batch_first=False)
+
         self.memory2mean = nn.Linear(d_model, d_model)
         self.memory2logv = nn.Linear(d_model, d_model)
 
     def forward(self, src, attention_mask=None):
         # src : (batch_size, seq_len)
 
-        src = self.embedding(src).transpose(0,1)
+        src = self.embedding(src.transpose(0,1))
         # src : (seq_len, batch_size, d_model)
 
-        attention_mask = attention_mask.byte()
-        memory = self.transformer_encoder(src, src_key_padding_mask=attention_mask)
-        # memory = (seq_len, batch_size, d_model)
+        if attention_mask is not None:
+            attention_mask = (torch.ones_like(attention_mask) - attention_mask).abs().bool()
+        out = self.transformer_encoder(src, src_key_padding_mask=attention_mask)
+        # out = (seq_len, batch_size, d_model)
+
+        hidden = torch.zeros(1, out.size()[1], self.gru.hidden_size, device=out.device)
+        _, memory = self.gru(out, hidden)
 
         mean = self.memory2mean(memory)
         logv = self.memory2logv(memory)
@@ -108,14 +114,14 @@ class transformer_Decoder(nn.Module):
         self.fc = nn.Linear(d_model, n_vocab)
 
     def forward(self, tgt, memory, tgt_mask=None, memory_mask=None, tgt_padding_mask=None, memory_padding_mask=None):
-        with torch.no_grad():
-            tgt = self.embedding(tgt)
-            tgt = tgt.transpose(0,1)
+        # with torch.no_grad():
+        #    tgt = self.embedding(tgt)
+        #    tgt = tgt.transpose(0,1)
+        tgt = self.embedding(tgt.transpose(0,1))
 
         tgt = tgt.to(memory.device)
         if tgt_mask is None:
             tgt_mask = self.generate_square_subsequent_mask(len(tgt)).to(memory.device)
-        memory = memory
         output = self.transformer_decoder(tgt, memory, tgt_mask=tgt_mask, memory_mask=memory_mask, tgt_key_padding_mask=tgt_padding_mask, memory_key_padding_mask=memory_padding_mask)
         output = self.fc(output)
         return output
