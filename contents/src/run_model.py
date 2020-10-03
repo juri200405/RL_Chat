@@ -40,13 +40,15 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
 
         inputs = inputs.to(encoder_device)
         inp_padding_mask = inp_padding_mask.to(encoder_device)
-        # embedding がencoderのdeviceにあるため、tgtはencoder_deviceに送る
-        tgt = tgt.to(encoder_device)
+        # # embedding がencoderのdeviceにあるため、tgtはencoder_deviceに送る
+        # tgt = tgt.to(encoder_device)
+        tgt = tgt.to(decoder_device)
         label = label.to(decoder_device)
         tgt_padding_mask = tgt_padding_mask.to(decoder_device)
 
         if vae:
-            mean, logv, memory = encoder(inputs, attention_mask=inp_padding_mask)
+            # mean, logv, memory = encoder(inputs, attention_mask=inp_padding_mask)
+            mean, logv, memory = encoder(inputs, attention_mask=tgt_padding_mask)
         else:
             memory = encoder(inputs, attention_mask=inp_padding_mask)
         memory = memory.to(decoder_device)
@@ -57,7 +59,7 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         label = label.transpose(0,1).contiguous().view(-1)
         
         if vae:
-            loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, mean, logv, epoch * len(train_itr) + n, 200 * len(train_itr))
+            loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, mean, logv, epoch * len(train_itr) + n, len(train_itr))
         else:
             loss = loss_func(out, label)
 
@@ -114,14 +116,17 @@ def anneal_function(step, x0, k=0.000015):
         tmp = sys.float_info.min
     return float(tmp)
 
-def get_vae_loss(label_loss_func, decoder_device, batch_size):
+def get_vae_loss(label_loss_func, decoder_device, batch_size, k, x0_epoch):
     label_loss_func = label_loss_func
-    def _f(out, label, logv, mean, step, x0):
+    k = k
+    x0_epoch = x0_epoch
+    def _f(out, label, logv, mean, step, len_itr):
+        x0 = x0_epoch * len_itr
         logv = logv.to(decoder_device)
         mean = mean.to(decoder_device)
         closs_entropy_loss = label_loss_func(out, label)
         KL_loss = -0.5 * torch.sum(1 + logv - mean.pow(2) - logv.exp())
-        KL_weight = anneal_function(step, x0)
+        KL_weight = anneal_function(step, x0, k)
         return (closs_entropy_loss + KL_weight * KL_loss) / batch_size, closs_entropy_loss, KL_loss, KL_weight
     return _f
 
@@ -154,6 +159,8 @@ if __name__ == "__main__":
     batch_size = hyperp["batch_size"]
     optim_type = hyperp["optim_type"]
     max_len = hyperp["max_len"]
+    anneal_k = hyperp["anneal_k"]
+    num_epoch = hyperp["num_epoch"]
 
     # available_cuda = torch.cuda.is_available()
     # encoder_device = decoder_device = torch.device('cuda' if (use_cuda and available_cuda) else 'cpu')
@@ -203,7 +210,7 @@ if __name__ == "__main__":
         # embedding_model = Transformer_Embedding(n_vocab, d_model, dropout, max_len)
         # encoder = transformer_Encoder(n_vocab, d_model, n_head, n_hidden, encoder_nlayers, embedding_model, nn.LayerNorm(d_model), dropout=dropout)
         encoder = transformer_Encoder(n_vocab, d_model, n_head, n_hidden, encoder_nlayers, Transformer_Embedding(n_vocab, d_model, dropout, max_len), nn.LayerNorm(d_model), dropout=dropout)
-        loss_func = get_vae_loss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), decoder_device, batch_size)
+        loss_func = get_vae_loss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), decoder_device, batch_size, anneal_k, num_epoch / 2)
         vae = True
     else:
         print("model_type missmatch")
@@ -255,7 +262,7 @@ if __name__ == "__main__":
 
     writer = SummaryWriter(log_dir=args.output_dir)
 
-    t_itr = tqdm.trange(200, leave=False)
+    t_itr = tqdm.trange(num_epoch, leave=False)
     for epoch in t_itr:
         train_loss = train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, n_vocab, encoder_device, decoder_device, writer, epoch, vae, args.output_dir)
         t_itr.set_postfix({"ave_loss":train_loss})

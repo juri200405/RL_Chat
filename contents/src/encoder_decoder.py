@@ -91,13 +91,11 @@ class transformer_Encoder(nn.Module):
         src = self.embedding(src.transpose(0,1))
         # src : (seq_len, batch_size, d_model)
 
-        if attention_mask is not None:
-            attention_mask = (torch.ones_like(attention_mask) - attention_mask).abs().bool()
-        out = self.transformer_encoder(src, src_key_padding_mask=attention_mask)
+        memory = self.transformer_encoder(src, src_key_padding_mask=attention_mask)
         # out = (seq_len, batch_size, d_model)
 
-        hidden = torch.zeros(1, out.size()[1], self.gru.hidden_size, device=out.device)
-        _, memory = self.gru(out, hidden)
+        # hidden = torch.zeros(1, out.shape[1], self.gru.hidden_size, device=out.device)
+        # _, memory = self.gru(out, hidden)
 
         mean = self.memory2mean(memory)
         logv = self.memory2logv(memory)
