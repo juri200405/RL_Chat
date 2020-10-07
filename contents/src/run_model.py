@@ -30,7 +30,7 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
     encoder.train()
     decoder.train()
     losses = []
-    train_itr = tqdm.tqdm(train_dataloader, leave=False)
+    train_itr = tqdm.tqdm(train_dataloader, leave=False, ncols=150)
     n = 0
     for sentence, inp_padding_mask, tgt_padding_mask in train_itr:
     # for sentence, _ in train_itr:
@@ -161,6 +161,9 @@ if __name__ == "__main__":
     max_len = hyperp["max_len"]
     anneal_k = hyperp["anneal_k"]
     num_epoch = hyperp["num_epoch"]
+    x0_epoch = hyperp["x0_epoch"]
+
+    print(args.output_dir)
 
     # available_cuda = torch.cuda.is_available()
     # encoder_device = decoder_device = torch.device('cuda' if (use_cuda and available_cuda) else 'cpu')
@@ -210,7 +213,7 @@ if __name__ == "__main__":
         # embedding_model = Transformer_Embedding(n_vocab, d_model, dropout, max_len)
         # encoder = transformer_Encoder(n_vocab, d_model, n_head, n_hidden, encoder_nlayers, embedding_model, nn.LayerNorm(d_model), dropout=dropout)
         encoder = transformer_Encoder(n_vocab, d_model, n_head, n_hidden, encoder_nlayers, Transformer_Embedding(n_vocab, d_model, dropout, max_len), nn.LayerNorm(d_model), dropout=dropout)
-        loss_func = get_vae_loss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), decoder_device, batch_size, anneal_k, num_epoch / 2)
+        loss_func = get_vae_loss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), decoder_device, batch_size, anneal_k, x0_epoch)
         vae = True
     else:
         print("model_type missmatch")
@@ -261,8 +264,10 @@ if __name__ == "__main__":
     train_dataloader = get_dataloader(train_dataset, batch_size, pad_index=3, bos_index=1, eos_index=2)
 
     writer = SummaryWriter(log_dir=args.output_dir)
+    with open(str(Path(args.output_dir) / "out_text.csv"), 'w', encoding='utf-8') as out:
+        out.write("input_text,reconstract_text")
 
-    t_itr = tqdm.trange(num_epoch, leave=False)
+    t_itr = tqdm.trange(num_epoch, leave=False, ncols=150)
     for epoch in t_itr:
         train_loss = train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, n_vocab, encoder_device, decoder_device, writer, epoch, vae, args.output_dir)
         t_itr.set_postfix({"ave_loss":train_loss})
@@ -272,6 +277,9 @@ if __name__ == "__main__":
         output_text = "{}\n{}\n-> {}\n   {}".format(sp.decode(input_data), input_data, sp.decode(output_data), output_data)
         t_itr.write(output_text)
         writer.add_text("output_text", output_text, epoch)
+
+        with open(str(Path(args.output_dir) / "out_text.csv"), 'a', encoding='utf-8') as out:
+            out.write("\n{},{}".format(sp.decode(input_data), sp.decode(output_data)))
 
         torch.save({
                 'epoch': true_epoch + epoch,
