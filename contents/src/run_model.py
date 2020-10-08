@@ -120,7 +120,7 @@ def get_vae_loss(label_loss_func, decoder_device, batch_size, k, x0_epoch):
     label_loss_func = label_loss_func
     k = k
     x0_epoch = x0_epoch
-    def _f(out, label, logv, mean, step, len_itr):
+    def _f(out, label, mean, logv, step, len_itr):
         x0 = x0_epoch * len_itr
         logv = logv.to(decoder_device)
         mean = mean.to(decoder_device)
