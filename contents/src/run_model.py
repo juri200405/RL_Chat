@@ -48,7 +48,7 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
 
         if vae:
             # mean, logv, memory = encoder(inputs, attention_mask=inp_padding_mask)
-            mean, logv, memory = encoder(inputs, attention_mask=tgt_padding_mask)
+            mean, m, memory = encoder(inputs, attention_mask=tgt_padding_mask)
         else:
             memory = encoder(inputs, attention_mask=inp_padding_mask)
         memory = memory.to(decoder_device)
@@ -59,7 +59,7 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         label = label.transpose(0,1).contiguous().view(-1)
         
         if vae:
-            loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, mean, logv, epoch * len(train_itr) + n, len(train_itr))
+            loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, mean, m, epoch * len(train_itr) + n, len(train_itr))
         else:
             loss = loss_func(out, label)
 
@@ -70,7 +70,7 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         decoder_opt.step()
 
         losses.append(loss.item())
-        train_itr.set_postfix({"loss":loss.item(), "weight":kl_weight})
+        train_itr.set_postfix({"loss":loss.item(), "weight":kl_weight, "kl_loss":kl_loss.item()})
         writer.add_scalar('Loss/each',loss.item(), epoch * len(train_itr) + n)
         if vae:
             writer.add_scalar('Detail_Loss/cross_entropy', cross_entropy.item(), epoch * len(train_itr) + n)
@@ -120,12 +120,11 @@ def get_vae_loss(label_loss_func, decoder_device, batch_size, k, x0_epoch):
     label_loss_func = label_loss_func
     k = k
     x0_epoch = x0_epoch
-    def _f(out, label, logv, mean, step, len_itr):
+    def _f(out, label, mean, m, step, len_itr):
         x0 = x0_epoch * len_itr
-        logv = logv.to(decoder_device)
-        mean = mean.to(decoder_device)
         closs_entropy_loss = label_loss_func(out, label)
-        KL_loss = -0.5 * torch.sum(1 + logv - mean.pow(2) - logv.exp())
+        m_t = torch.distributions.multivariate_normal.MultivariateNormal(torch.zeros(mean.shape[1], device=mean.device), torch.eye(mean.shape[1], device=mean.device))
+        KL_loss = torch.distributions.kl.kl_divergence(m, m_t).sum().to(decoder_device)
         KL_weight = anneal_function(step, x0, k)
         return (closs_entropy_loss + KL_weight * KL_loss) / batch_size, closs_entropy_loss, KL_loss, KL_weight
     return _f
@@ -162,6 +161,9 @@ if __name__ == "__main__":
     anneal_k = hyperp["anneal_k"]
     num_epoch = hyperp["num_epoch"]
     x0_epoch = hyperp["x0_epoch"]
+    fix_len = hyperp["fix_len"]
+    n_latent = hyperp["n_latent"]
+    mpl_n_hidden = hyperp["mpl_n_hidden"]
 
     print(args.output_dir)
 
@@ -212,7 +214,7 @@ if __name__ == "__main__":
     elif model_type == "transformer_vae":
         # embedding_model = Transformer_Embedding(n_vocab, d_model, dropout, max_len)
         # encoder = transformer_Encoder(n_vocab, d_model, n_head, n_hidden, encoder_nlayers, embedding_model, nn.LayerNorm(d_model), dropout=dropout)
-        encoder = transformer_Encoder(n_vocab, d_model, n_head, n_hidden, encoder_nlayers, Transformer_Embedding(n_vocab, d_model, dropout, max_len), nn.LayerNorm(d_model), dropout=dropout)
+        encoder = transformer_Encoder(n_vocab, d_model, n_head, n_hidden, encoder_nlayers, fix_len, n_latent, mpl_n_hidden, Transformer_Embedding(n_vocab, d_model, dropout, max_len), nn.LayerNorm(d_model), dropout=dropout)
         loss_func = get_vae_loss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), decoder_device, batch_size, anneal_k, x0_epoch)
         vae = True
     else:
@@ -230,7 +232,7 @@ if __name__ == "__main__":
         json.dump(hyperp, f)
 
     # decoder = transformer_Decoder(n_vocab, d_model, n_head, n_hidden, decoder_nlayers, embedding_model, nn.LayerNorm(d_model), dropout=dropout)
-    decoder = transformer_Decoder(n_vocab, d_model, n_head, n_hidden, decoder_nlayers, Transformer_Embedding(n_vocab, d_model, dropout, max_len), nn.LayerNorm(d_model), dropout=dropout)
+    decoder = transformer_Decoder(n_vocab, d_model, n_head, n_hidden, decoder_nlayers, fix_len, n_latent, Transformer_Embedding(n_vocab, d_model, dropout, max_len), nn.LayerNorm(d_model), dropout=dropout)
 
     # encoderのBERT内に組み込まれてる BertEmbeddings をdecoderで使うため、GPUへ送る順番は decoder->encoder
     decoder = decoder.to(decoder_device)
@@ -261,7 +263,7 @@ if __name__ == "__main__":
         true_epoch = 0
 
     train_dataset = txt_to_idlist(sp, args.input_file, 3)
-    train_dataloader = get_dataloader(train_dataset, batch_size, pad_index=3, bos_index=1, eos_index=2)
+    train_dataloader = get_dataloader(train_dataset, batch_size, pad_index=3, bos_index=1, eos_index=2, fix_len=fix_len)
 
     writer = SummaryWriter(log_dir=args.output_dir)
     with open(str(Path(args.output_dir) / "out_text.csv"), 'w', encoding='utf-8') as out:
