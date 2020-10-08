@@ -23,13 +23,18 @@ class Transformer_Embedding(nn.Module):
         pe = pe.unsqueeze(0).transpose(0, 1)
         self.register_buffer('pe', pe)
 
+        # self.position_embedding = nn.Embedding(max_len, d_model)
+        # self.register_buffer("position_ids", torch.arange(max_len).expand((1,-1)))
+
     def forward(self, x):
         # x : (seq_len, batch_size)
+        # pos_id = self.position_ids[:, :x.shape[0]]
 
         x = self.embedding(x)
         # x : (seq_len, batch_size, d_model)
 
         x = x + self.pe[:x.size(0), :]
+        # x = x + self.position_embedding(pos_id).transpose(0,1)
         # x : (seq_len, batch_size, d_model)
         return self.dropout(x)
 
@@ -101,7 +106,6 @@ class transformer_Encoder(nn.Module):
 
         v = torch.reshape(logv.exp(), (mean.shape[0], mean.shape[1], mean.shape[1]))
         m = MultivariateNormal(mean, scale_tril=torch.tril(v))
-        # m = MultivariateNormal(mean, torch.diag_embed(logv.exp()))
         z = m.rsample()
         return mean, m, z
 

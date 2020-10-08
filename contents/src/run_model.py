@@ -66,6 +66,8 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         encoder_opt.zero_grad()
         decoder_opt.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(encoder.parameters(), 0.5)
+        torch.nn.utils.clip_grad_norm_(decoder.parameters(), 0.5)
         encoder_opt.step()
         decoder_opt.step()
 
@@ -110,21 +112,21 @@ def test(encoder, decoder, test_data, loss_func, n_vocab, encoder_device, decode
     return data, ids
 
 def anneal_function(step, x0, k=0.000015):
-    tmp = 1/(1+decimal.Decimal(-k*(step-x0)).exp())
-    # print("tmp:{}, < min:{}, step:{}, x0:{}".format(tmp, tmp<sys.float_info.min, step, x0))
-    if tmp < sys.float_info.min:
-        tmp = sys.float_info.min
-    return float(tmp)
+    # tmp = 1/(1+decimal.Decimal(-k*(step-x0)).exp())
+    # if tmp < sys.float_info.min:
+    #     tmp = sys.float_info.min
+    # return float(tmp)
+    return 1.0
 
 def get_vae_loss(label_loss_func, decoder_device, batch_size, k, x0_epoch):
     label_loss_func = label_loss_func
     k = k
     x0_epoch = x0_epoch
+    m_t = torch.distributions.multivariate_normal.MultivariateNormal(torch.zeros(n_latent, device=decoder_device), torch.eye(n_latent, device=decoder_device)*1.5)
     def _f(out, label, mean, m, step, len_itr):
         x0 = x0_epoch * len_itr
         closs_entropy_loss = label_loss_func(out, label)
-        m_t = torch.distributions.multivariate_normal.MultivariateNormal(torch.zeros(mean.shape[1], device=mean.device), torch.eye(mean.shape[1], device=mean.device))
-        KL_loss = torch.distributions.kl.kl_divergence(m, m_t).sum().to(decoder_device)
+        KL_loss = torch.distributions.kl.kl_divergence(m, m_t).sum()
         KL_weight = anneal_function(step, x0, k)
         return (closs_entropy_loss + KL_weight * KL_loss) / batch_size, closs_entropy_loss, KL_loss, KL_weight
     return _f
@@ -167,10 +169,6 @@ if __name__ == "__main__":
 
     print(args.output_dir)
 
-    # available_cuda = torch.cuda.is_available()
-    # encoder_device = decoder_device = torch.device('cuda' if (use_cuda and available_cuda) else 'cpu')
-    # decoder_device = torch.device('cuda' if (use_cuda and available_cuda) else 'cpu')
-    # encoder_device = torch.device('cpu')
     device_num = torch.cuda.device_count()
     if len(use_gpus) > 1:
         if device_num > 1:
@@ -212,9 +210,9 @@ if __name__ == "__main__":
         d_model = encoder.bert.config.hidden_size
         embedding_model = encoder.bert.get_input_embeddings()
     elif model_type == "transformer_vae":
-        # embedding_model = Transformer_Embedding(n_vocab, d_model, dropout, max_len)
-        # encoder = transformer_Encoder(n_vocab, d_model, n_head, n_hidden, encoder_nlayers, embedding_model, nn.LayerNorm(d_model), dropout=dropout)
-        encoder = transformer_Encoder(n_vocab, d_model, n_head, n_hidden, encoder_nlayers, fix_len, n_latent, mpl_n_hidden, Transformer_Embedding(n_vocab, d_model, dropout, max_len), nn.LayerNorm(d_model), dropout=dropout)
+        embedding_model = Transformer_Embedding(n_vocab, d_model, dropout, max_len)
+        encoder = transformer_Encoder(n_vocab, d_model, n_head, n_hidden, encoder_nlayers, fix_len, n_latent, mpl_n_hidden, embedding_model, nn.LayerNorm(d_model), dropout=dropout)
+        # encoder = transformer_Encoder(n_vocab, d_model, n_head, n_hidden, encoder_nlayers, fix_len, n_latent, mpl_n_hidden, Transformer_Embedding(n_vocab, d_model, dropout, max_len), nn.LayerNorm(d_model), dropout=dropout)
         loss_func = get_vae_loss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), decoder_device, batch_size, anneal_k, x0_epoch)
         vae = True
     else:
@@ -231,8 +229,8 @@ if __name__ == "__main__":
     with open(str(Path(args.output_dir) / "hyper_param.json"), 'wt') as f:
         json.dump(hyperp, f)
 
-    # decoder = transformer_Decoder(n_vocab, d_model, n_head, n_hidden, decoder_nlayers, embedding_model, nn.LayerNorm(d_model), dropout=dropout)
-    decoder = transformer_Decoder(n_vocab, d_model, n_head, n_hidden, decoder_nlayers, fix_len, n_latent, Transformer_Embedding(n_vocab, d_model, dropout, max_len), nn.LayerNorm(d_model), dropout=dropout)
+    decoder = transformer_Decoder(n_vocab, d_model, n_head, n_hidden, decoder_nlayers, fix_len, n_latent, embedding_model, nn.LayerNorm(d_model), dropout=dropout)
+    # decoder = transformer_Decoder(n_vocab, d_model, n_head, n_hidden, decoder_nlayers, fix_len, n_latent, Transformer_Embedding(n_vocab, d_model, dropout, max_len), nn.LayerNorm(d_model), dropout=dropout)
 
     # encoderのBERT内に組み込まれてる BertEmbeddings をdecoderで使うため、GPUへ送る順番は decoder->encoder
     decoder = decoder.to(decoder_device)
