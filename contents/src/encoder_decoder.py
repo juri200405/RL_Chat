@@ -9,15 +9,15 @@ from transformers import BertModel
 
 
 class Transformer_Embedding(nn.Module):
-    def __init__(self, n_vocab, d_model, dropout, max_len):
+    def __init__(self, config):
         super(Transformer_Embedding, self).__init__()
 
-        self.embedding = nn.Embedding(n_vocab, d_model)
-        self.dropout = nn.Dropout(p=dropout)
+        self.embedding = nn.Embedding(config.n_vocab, config.d_model)
+        self.dropout = nn.Dropout(p=config.dropout)
 
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe = torch.zeros(config.max_len, config.d_model)
+        position = torch.arange(0, config.max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, config.d_model, 2).float() * (-math.log(10000.0) / config.d_model))
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0).transpose(0, 1)
@@ -38,22 +38,6 @@ class Transformer_Embedding(nn.Module):
         # x : (seq_len, batch_size, d_model)
         return self.dropout(x)
 
-class Bert_Encoder_gru(nn.Module):
-    def __init__(self, bert_path):
-        super(Bert_Encoder_gru, self).__init__()
-
-        self.bert = BertModel.from_pretrained(bert_path)
-        self.gru = nn.GRU(input_size=self.bert.config.hidden_size, hidden_size=self.bert.config.hidden_size, batch_first=True)
-
-
-    def forward(self, src, attention_mask=None):
-        with torch.no_grad():
-            bert_output = self.bert(src, attention_mask=attention_mask)
-            bert_output = bert_output[0]
-        # bertの最終隠れ層を、GRUで合成したものを出力
-        hidden = torch.zeros(1, bert_output.size()[0], self.gru.hidden_size, device=bert_output.device)
-        _, memory = self.gru(bert_output, hidden)
-        return memory # (1, batch, d_model)
 
 class Bert_Encoder_vae(nn.Module):
     def __init__(self, bert_path):
@@ -77,18 +61,16 @@ class Bert_Encoder_vae(nn.Module):
 
         m = MultivariateNormal(mean, torch.diag_embed(logv.exp()))
         z = m.rsample()
-        return mean, logv, z # (1, batch, d_model)
+        return m, z # (1, batch, d_model)
 
 class transformer_Encoder(nn.Module):
-    def __init__(self, n_vocab, d_model, n_head, n_hidden, n_layers, seq_len, n_latent, mpl_n_hidden, embedding, norm=None, dropout=0.1):
+    def __init__(self, config, embedding, norm=None):
         super(transformer_Encoder, self).__init__()
         self.embedding = embedding
-        self.transformer_encoder = nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model, n_head, n_hidden, dropout), n_layers, norm)
+        self.transformer_encoder = nn.TransformerEncoder(nn.TransformerEncoderLayer(config.d_model, config.n_head, config.n_hidden, config.dropout), config.encoder_nlayers, norm)
         
-        self.fc = nn.Linear(seq_len * d_model, mpl_n_hidden)
-        self.memory2mean = nn.Linear(mpl_n_hidden, n_latent)
-        self.memory2logv = nn.Linear(mpl_n_hidden, n_latent * n_latent)
-        # self.memory2logv = nn.Linear(mpl_n_hidden, n_latent)
+        self.memory2mean = nn.Linear(config.d_model, config.d_model)
+        self.memory2logv = nn.Linear(config.d_model, config.d_model)
 
     def forward(self, src, attention_mask=None):
         # src : (batch_size, seq_len)
@@ -107,15 +89,14 @@ class transformer_Encoder(nn.Module):
         v = torch.reshape(logv.exp(), (mean.shape[0], mean.shape[1], mean.shape[1]))
         m = MultivariateNormal(mean, scale_tril=torch.tril(v))
         z = m.rsample()
-        return mean, m, z
+        return m, z
 
 class transformer_Decoder(nn.Module):
-    def __init__(self, n_vocab, d_model, n_head, n_hidden, n_layers, seq_len, n_latent, embedding, norm=None, dropout=0.1):
+    def __init__(self, config, embedding, norm=None):
         super(transformer_Decoder, self).__init__()
         self.embedding = embedding
-        self.transformer_decoder = nn.TransformerDecoder(nn.TransformerDecoderLayer(d_model, n_head, n_hidden, dropout), n_layers, norm)
-        self.latent2memory = nn.Linear(n_latent, seq_len * d_model)
-        self.fc = nn.Linear(d_model, n_vocab)
+        self.transformer_decoder = nn.TransformerDecoder(nn.TransformerDecoderLayer(config.d_model, config.n_head, config.n_hidden, config.dropout), config.decoder_nlayers, norm)
+        self.fc = nn.Linear(config.d_model, config.n_vocab)
 
     def forward(self, tgt, latent, tgt_mask=None, memory_mask=None, tgt_padding_mask=None, memory_padding_mask=None):
         # with torch.no_grad():
