@@ -56,7 +56,7 @@ class Bert_Encoder_vae(nn.Module):
 
         m = MultivariateNormal(mean, torch.diag_embed(logv.exp()))
         z = m.rsample()
-        return mean, logv, z # (1, batch, d_model)
+        return m, z # (1, batch, d_model)
 
 class transformer_Encoder(nn.Module):
     def __init__(self, config, embedding, norm=None):
@@ -84,7 +84,7 @@ class transformer_Encoder(nn.Module):
 
         m = MultivariateNormal(mean, torch.diag_embed(logv.exp()))
         z = m.rsample()
-        return mean, logv, z
+        return m, z
 
 class transformer_Decoder(nn.Module):
     def __init__(self, config, embedding, norm=None):

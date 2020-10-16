@@ -25,6 +25,7 @@ from bert_data import txt_to_idlist
 from bert_dataloader import get_dataloader
 from encoder_decoder import Bert_Encoder_vae, transformer_Decoder, Transformer_Embedding, transformer_Encoder
 from config import Config
+from losses import VaeLoss
 
 
 def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, config, writer, epoch, output_dir=Path("")):
@@ -48,9 +49,9 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         tgt_padding_mask = tgt_padding_mask.to(config.decoder_device)
 
         if config.model_type == "bert":
-            mean, logv, memory = encoder(inputs, attention_mask=inp_padding_mask)
+            m, memory = encoder(inputs, attention_mask=inp_padding_mask)
         else:
-            mean, logv, memory = encoder(inputs, attention_mask=tgt_padding_mask)
+            m, memory = encoder(inputs, attention_mask=tgt_padding_mask)
         memory = memory.to(config.decoder_device)
         out = decoder(tgt, memory, tgt_padding_mask=tgt_padding_mask)
         # make_dot(out).render(str(output_dir + "graph"))
@@ -58,7 +59,7 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         out = out[:-1].contiguous().view(-1, out.shape[-1])
         label = label.transpose(0,1).contiguous().view(-1)
         
-        loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, mean, logv, epoch * len(train_itr) + n, len(train_itr))
+        loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, m, epoch * len(train_itr) + n)
 
         encoder_opt.zero_grad()
         decoder_opt.zero_grad()
@@ -82,14 +83,14 @@ def test(encoder, decoder, test_data, loss_func, config):
     data = random.choice(test_data)
 
     input_s = torch.tensor([1] + data + [2], device=config.encoder_device).unsqueeze(0)
-    _, _, memory = encoder(input_s)
+    _, memory = encoder(input_s)
     memory = memory.to(config.decoder_device)
 
     tgt = torch.full((1, config.max_len), 0, dtype=torch.long, device=config.encoder_device)
     tgt_key_padding_mask = torch.full((1, config.max_len), True, dtype=torch.bool, device=config.decoder_device)
     t_word = 1 # <s>
     ids = []
-    for t in range(max_len):
+    for t in range(config.max_len):
         tgt[0][t] = t_word
         tgt_key_padding_mask[0][t] = False
         out = decoder(tgt, memory, tgt_padding_mask=tgt_key_padding_mask)
@@ -101,23 +102,6 @@ def test(encoder, decoder, test_data, loss_func, config):
         else:
             t_word = next_word
     return data, ids
-
-def anneal_function(step, x0, k=0.000015):
-    tmp = 1/(1+decimal.Decimal(-k*(step-x0)).exp())
-    if tmp < sys.float_info.min:
-        tmp = sys.float_info.min
-    return float(tmp)
-
-def get_vae_loss(label_loss_func, config):
-    def _f(out, label, mean, logv, step, len_itr):
-        x0 = config.x0_epoch * len_itr
-        logv = logv.to(config.decoder_device)
-        mean = mean.to(config.decoder_device)
-        closs_entropy_loss = label_loss_func(out, label)
-        KL_loss = -0.5 * torch.sum(1 + logv - mean.pow(2) - logv.exp())
-        KL_weight = anneal_function(step, x0, config.anneal_k)
-        return (closs_entropy_loss + KL_weight * KL_loss) / config.batch_size, closs_entropy_loss, KL_loss, KL_weight
-    return _f
 
 
 if __name__ == "__main__":
@@ -151,7 +135,10 @@ if __name__ == "__main__":
         print("model_type missmatch")
         exit()
 
-    loss_func = get_vae_loss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), model_config)
+    train_dataset = txt_to_idlist(sp, args.input_file, 3)
+    train_dataloader = get_dataloader(train_dataset, model_config.batch_size, pad_index=3, bos_index=1, eos_index=2)
+
+    loss_func = VaeLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), model_config, len(train_dataloader)).forward
     model_config.save_json(str(Path(args.output_dir) / "hyper_param.json"))
 
     # decoder = transformer_Decoder(model_config, embedding_model, nn.LayerNorm(model_config.d_model))
@@ -185,8 +172,6 @@ if __name__ == "__main__":
     else:
         true_epoch = 0
 
-    train_dataset = txt_to_idlist(sp, args.input_file, 3)
-    train_dataloader = get_dataloader(train_dataset, model_config.batch_size, pad_index=3, bos_index=1, eos_index=2)
 
     writer = SummaryWriter(log_dir=args.output_dir)
     with open(str(Path(args.output_dir) / "out_text.csv"), 'w', encoding='utf-8') as out:
@@ -213,6 +198,6 @@ if __name__ == "__main__":
                 'encoder_opt_state_dict': encoder_opt.state_dict(),
                 'decoder_opt_state_dict': decoder_opt.state_dict(),
                 'train_loss': train_loss},
-            str(Path(args.output_dir) / "{}_epoch{:03d}.pt".format(device_name, epoch)))
+            str(Path(args.output_dir) / "epoch{:03d}.pt".format(epoch)))
 
     writer.close()
