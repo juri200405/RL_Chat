@@ -3,8 +3,6 @@ from pathlib import Path
 import random
 import json
 from itertools import chain
-import sys
-import decimal
 
 import torch
 import torch.nn as nn
@@ -19,7 +17,7 @@ import tqdm
 import sentencepiece as spm
 
 from transformers import BertModel
-from torchviz import make_dot
+# from torchviz import make_dot
 
 from bert_data import txt_to_idlist
 from bert_dataloader import get_dataloader
