@@ -83,6 +83,8 @@ def test(encoder, decoder, test_data, loss_func, config):
     data = random.choice(test_data)
 
     input_s = torch.tensor([1] + data + [2], device=config.encoder_device).unsqueeze(0)
+    pad = torch.full((1, config.max_len - input_s.shape[1]), 3, dtype=torch.long, device=config.encoder_device)
+    input_s = torch.cat((input_s, pad), dim=1)
     _, memory = encoder(input_s)
     memory = memory.to(config.decoder_device)
 
@@ -135,7 +137,7 @@ if __name__ == "__main__":
         exit()
 
     train_dataset = txt_to_idlist(sp, args.input_file, 3)
-    train_dataloader = get_dataloader(train_dataset, model_config.batch_size, pad_index=3, bos_index=1, eos_index=2)
+    train_dataloader = get_dataloader(train_dataset, model_config.batch_size, pad_index=3, bos_index=1, eos_index=2, fix_len = model_config.max_len)
 
     loss_func = VaeLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), model_config, len(train_dataloader)).forward
     model_config.save_json(str(Path(args.output_dir) / "hyper_param.json"))

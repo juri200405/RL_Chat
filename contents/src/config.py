@@ -11,6 +11,8 @@ class Config:
         self._decoder_nlayers = 2
         self._n_head = 2
         self._max_len = 128
+        self._mlp_n_hidden = 1024
+        self._n_latent = 128
 
         self._anneal_k = 0.00005
         self._x0_epoch = 20
@@ -78,6 +80,20 @@ class Config:
     @max_len.setter
     def max_len(self, value: int) -> None:
         self._max_len = value
+
+    @property
+    def mlp_n_hidden(self) -> int:
+        return self._mlp_n_hidden
+    @max_len.setter
+    def mlp_n_hidden(self, value: int) -> None:
+        self._mlp_n_hidden = value
+
+    @property
+    def n_latent(self) -> int:
+        return self._n_latent
+    @max_len.setter
+    def n_latent(self, value: int) -> None:
+        self._n_latent = value
 
     @property
     def anneal_k(self) -> float:
@@ -163,6 +179,8 @@ class Config:
         self.anneal_k = hyperp["anneal_k"]
         self.num_epoch = hyperp["num_epoch"]
         self.x0_epoch = hyperp["x0_epoch"]
+        self.mlp_n_hidden = hyperp["mlp_n_hidden"]
+        self.n_latent = hyperp["n_latent"]
 
         use_gpus = hyperp["use_gpus"]
 
@@ -206,6 +224,8 @@ class Config:
         hyperp["anneal_k"] = self.anneal_k
         hyperp["num_epoch"] = self.num_epoch
         hyperp["x0_epoch"] = self.x0_epoch
+        hyperp["mlp_n_hidden"] = self.mlp_n_hidden
+        hyperp["n_latent"] = self.n_latent
 
         if self._device_name == "cpu":
             hyperp["use_gpus"] = []

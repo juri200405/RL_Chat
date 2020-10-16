@@ -69,8 +69,10 @@ class transformer_Encoder(nn.Module):
         self.embedding = embedding
         self.transformer_encoder = nn.TransformerEncoder(nn.TransformerEncoderLayer(config.d_model, config.n_head, config.n_hidden, config.dropout), config.encoder_nlayers, norm)
         
-        self.memory2mean = nn.Linear(config.d_model, config.d_model)
-        self.memory2logv = nn.Linear(config.d_model, config.d_model)
+        self.fc = nn.Linear(config.max_len * config.d_model, config.mlp_n_hidden)
+        self.memory2mean = nn.Linear(config.mlp_n_hidden, config.n_latent)
+        # self.memory2logv = nn.Linear(config.mlp_n_hidden, config.n_latent * config.n_latent)
+        self.memory2logv = nn.Linear(config.mlp_n_hidden, config.n_latent)
 
     def forward(self, src, attention_mask=None):
         # src : (batch_size, seq_len)
@@ -86,8 +88,10 @@ class transformer_Encoder(nn.Module):
         mean = self.memory2mean(memory)
         logv = self.memory2logv(memory)
 
-        v = torch.reshape(logv.exp(), (mean.shape[0], mean.shape[1], mean.shape[1]))
-        m = MultivariateNormal(mean, scale_tril=torch.tril(v))
+        # logv = torch.reshape(logv, (mean.shape[0], mean.shape[1], mean.shape[1]))
+        # v = torch.matmul(logv, logv.transpose(1,2)).exp()
+        v = torch.diag_embed(logv.exp())
+        m = MultivariateNormal(mean, covariance_matrix=v)
         z = m.rsample()
         return m, z
 
@@ -97,6 +101,9 @@ class transformer_Decoder(nn.Module):
         self.embedding = embedding
         self.transformer_decoder = nn.TransformerDecoder(nn.TransformerDecoderLayer(config.d_model, config.n_head, config.n_hidden, config.dropout), config.decoder_nlayers, norm)
         self.fc = nn.Linear(config.d_model, config.n_vocab)
+
+        self.latent2hidden = nn.Linear(config.n_latent, config.mlp_n_hidden)
+        self.hidden2memory = nn.Linear(config.mlp_n_hidden, config.max_len * config.d_model)
 
     def forward(self, tgt, latent, tgt_mask=None, memory_mask=None, tgt_padding_mask=None, memory_padding_mask=None):
         # with torch.no_grad():
@@ -108,7 +115,8 @@ class transformer_Decoder(nn.Module):
         if tgt_mask is None:
             tgt_mask = self.generate_square_subsequent_mask(len(tgt)).to(latent.device)
 
-        memory = self.latent2memory(latent)
+        memory = self.hidden2memory(F.relu(self.latent2hidden(latent)))
+        # memory = self.latent2memory(latent)
         memory = torch.reshape(memory, (tgt.shape[1], tgt.shape[0], tgt.shape[2])).transpose(0,1)
 
         output = self.transformer_decoder(tgt, memory, tgt_mask=tgt_mask, memory_mask=memory_mask, tgt_key_padding_mask=tgt_padding_mask, memory_key_padding_mask=memory_padding_mask)
