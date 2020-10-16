@@ -30,7 +30,7 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
     encoder.train()
     decoder.train()
     losses = []
-    train_itr = tqdm.tqdm(train_dataloader, leave=False, ncols=150)
+    train_itr = tqdm.tqdm(train_dataloader, leave=False, ncols=180)
     n = 0
     for sentence, inp_padding_mask, tgt_padding_mask in train_itr:
     # for sentence, _ in train_itr:
@@ -68,7 +68,7 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         decoder_opt.step()
 
         losses.append(loss.item())
-        train_itr.set_postfix({"loss":loss.item(), "weight":kl_weight, "kl_loss":kl_loss.item()})
+        train_itr.set_postfix({"loss":loss.item(), "ce_loss":cross_entropy.item() , "weight":kl_weight, "kl_loss":kl_loss.item()})
         writer.add_scalar('Loss/each',loss.item(), epoch * len(train_itr) + n)
         writer.add_scalar('Detail_Loss/cross_entropy', cross_entropy.item(), epoch * len(train_itr) + n)
         writer.add_scalar('Detail_Loss/kl_loss', kl_loss.item(), epoch * len(train_itr) + n)
@@ -177,7 +177,7 @@ if __name__ == "__main__":
     with open(str(Path(args.output_dir) / "out_text.csv"), 'w', encoding='utf-8') as out:
         out.write("input_text,reconstract_text")
 
-    t_itr = tqdm.trange(model_config.num_epoch, leave=False, ncols=150)
+    t_itr = tqdm.trange(model_config.num_epoch, leave=False, ncols=180)
     for epoch in t_itr:
         train_loss = train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, model_config, writer, epoch, args.output_dir)
         t_itr.set_postfix({"ave_loss":train_loss})

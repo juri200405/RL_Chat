@@ -71,8 +71,9 @@ class transformer_Encoder(nn.Module):
         
         self.fc = nn.Linear(config.max_len * config.d_model, config.mlp_n_hidden)
         self.memory2mean = nn.Linear(config.mlp_n_hidden, config.n_latent)
-        # self.memory2logv = nn.Linear(config.mlp_n_hidden, config.n_latent * config.n_latent)
-        self.memory2logv = nn.Linear(config.mlp_n_hidden, config.n_latent)
+        self.memory2logv = nn.Linear(config.mlp_n_hidden, config.n_latent * config.n_latent)
+        # self.memory2logv = nn.Linear(config.mlp_n_hidden, config.n_latent)
+        self.tanh = nn.Tanh()
 
     def forward(self, src, attention_mask=None):
         # src : (batch_size, seq_len)
@@ -86,12 +87,17 @@ class transformer_Encoder(nn.Module):
 
         memory = F.relu(self.fc(out))
         mean = self.memory2mean(memory)
+        # logv = self.tanh(self.memory2logv(memory))
         logv = self.memory2logv(memory)
 
-        # logv = torch.reshape(logv, (mean.shape[0], mean.shape[1], mean.shape[1]))
-        # v = torch.matmul(logv, logv.transpose(1,2)).exp()
-        v = torch.diag_embed(logv.exp())
-        m = MultivariateNormal(mean, covariance_matrix=v)
+        logv = torch.reshape(logv, (mean.shape[0], mean.shape[1], mean.shape[1]))
+        v = torch.tril(logv.exp())
+        # print(v[0][0][0].item())
+        # v = torch.matmul(logv, logv.transpose(1,2))
+        # v = v.exp()
+        # v = torch.diag_embed(logv.exp())
+        # m = MultivariateNormal(mean, covariance_matrix=v)
+        m = MultivariateNormal(mean, scale_tril=v)
         z = m.rsample()
         return m, z
 
