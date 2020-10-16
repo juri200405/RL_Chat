@@ -23,10 +23,12 @@ from torchviz import make_dot
 
 from bert_data import txt_to_idlist
 from bert_dataloader import get_dataloader
-from encoder_decoder import Bert_Encoder_gru, Bert_Encoder_vae, transformer_Decoder, Transformer_Embedding, transformer_Encoder
+from encoder_decoder import Bert_Encoder_vae, transformer_Decoder, Transformer_Embedding, transformer_Encoder
+from config import Config
+from losses import VaeLoss
 
 
-def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, n_vocab, encoder_device, decoder_device, writer, epoch, vae=False, output_dir=Path("")):
+def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, config, writer, epoch, output_dir=Path("")):
     encoder.train()
     decoder.train()
     losses = []
@@ -38,30 +40,26 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         tgt = sentence[:,:]
         label = sentence[:,1:]
 
-        inputs = inputs.to(encoder_device)
-        inp_padding_mask = inp_padding_mask.to(encoder_device)
+        inputs = inputs.to(config.encoder_device)
+        inp_padding_mask = inp_padding_mask.to(config.encoder_device)
         # # embedding がencoderのdeviceにあるため、tgtはencoder_deviceに送る
-        # tgt = tgt.to(encoder_device)
-        tgt = tgt.to(decoder_device)
-        label = label.to(decoder_device)
-        tgt_padding_mask = tgt_padding_mask.to(decoder_device)
+        # tgt = tgt.to(config.encoder_device)
+        tgt = tgt.to(config.decoder_device)
+        label = label.to(config.decoder_device)
+        tgt_padding_mask = tgt_padding_mask.to(config.decoder_device)
 
-        if vae:
-            # mean, logv, memory = encoder(inputs, attention_mask=inp_padding_mask)
-            mean, logv, memory = encoder(inputs, attention_mask=tgt_padding_mask)
+        if config.model_type == "bert":
+            m, memory = encoder(inputs, attention_mask=inp_padding_mask)
         else:
-            memory = encoder(inputs, attention_mask=inp_padding_mask)
-        memory = memory.to(decoder_device)
+            m, memory = encoder(inputs, attention_mask=tgt_padding_mask)
+        memory = memory.to(config.decoder_device)
         out = decoder(tgt, memory, tgt_padding_mask=tgt_padding_mask)
         # make_dot(out).render(str(output_dir + "graph"))
 
         out = out[:-1].contiguous().view(-1, out.shape[-1])
         label = label.transpose(0,1).contiguous().view(-1)
         
-        if vae:
-            loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, mean, logv, epoch * len(train_itr) + n, len(train_itr))
-        else:
-            loss = loss_func(out, label)
+        loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, m, epoch * len(train_itr) + n)
 
         encoder_opt.zero_grad()
         decoder_opt.zero_grad()
@@ -72,31 +70,27 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         losses.append(loss.item())
         train_itr.set_postfix({"loss":loss.item(), "weight":kl_weight})
         writer.add_scalar('Loss/each',loss.item(), epoch * len(train_itr) + n)
-        if vae:
-            writer.add_scalar('Detail_Loss/cross_entropy', cross_entropy.item(), epoch * len(train_itr) + n)
-            writer.add_scalar('Detail_Loss/kl_loss', kl_loss.item(), epoch * len(train_itr) + n)
-            writer.add_scalar('Detail_Loss/kl_weight', kl_weight, epoch * len(train_itr) + n)
+        writer.add_scalar('Detail_Loss/cross_entropy', cross_entropy.item(), epoch * len(train_itr) + n)
+        writer.add_scalar('Detail_Loss/kl_loss', kl_loss.item(), epoch * len(train_itr) + n)
+        writer.add_scalar('Detail_Loss/kl_weight', kl_weight, epoch * len(train_itr) + n)
 
         n += 1
     return np.mean(losses)
 
-def test(encoder, decoder, test_data, loss_func, n_vocab, encoder_device, decoder_device, max_length=128, vae=False):
+def test(encoder, decoder, test_data, loss_func, config):
     encoder.eval()
     decoder.eval()
     data = random.choice(test_data)
 
-    input_s = torch.tensor([1] + data + [2], device=encoder_device).unsqueeze(0)
-    if vae:
-        _, _, memory = encoder(input_s)
-    else:
-        memory = encoder(input_s)
-    memory = memory.to(decoder_device)
+    input_s = torch.tensor([1] + data + [2], device=config.encoder_device).unsqueeze(0)
+    _, memory = encoder(input_s)
+    memory = memory.to(config.decoder_device)
 
-    tgt = torch.full((1, max_length), 0, dtype=torch.long, device=encoder_device)
-    tgt_key_padding_mask = torch.full((1, max_length), True, dtype=torch.bool, device=decoder_device)
+    tgt = torch.full((1, config.max_len), 0, dtype=torch.long, device=config.encoder_device)
+    tgt_key_padding_mask = torch.full((1, config.max_len), True, dtype=torch.bool, device=config.decoder_device)
     t_word = 1 # <s>
     ids = []
-    for t in range(max_length):
+    for t in range(config.max_len):
         tgt[0][t] = t_word
         tgt_key_padding_mask[0][t] = False
         out = decoder(tgt, memory, tgt_padding_mask=tgt_key_padding_mask)
@@ -108,27 +102,6 @@ def test(encoder, decoder, test_data, loss_func, n_vocab, encoder_device, decode
         else:
             t_word = next_word
     return data, ids
-
-def anneal_function(step, x0, k=0.000015):
-    tmp = 1/(1+decimal.Decimal(-k*(step-x0)).exp())
-    # print("tmp:{}, < min:{}, step:{}, x0:{}".format(tmp, tmp<sys.float_info.min, step, x0))
-    if tmp < sys.float_info.min:
-        tmp = sys.float_info.min
-    return float(tmp)
-
-def get_vae_loss(label_loss_func, decoder_device, batch_size, k, x0_epoch):
-    label_loss_func = label_loss_func
-    k = k
-    x0_epoch = x0_epoch
-    def _f(out, label, mean, logv, step, len_itr):
-        x0 = x0_epoch * len_itr
-        logv = logv.to(decoder_device)
-        mean = mean.to(decoder_device)
-        closs_entropy_loss = label_loss_func(out, label)
-        KL_loss = -0.5 * torch.sum(1 + logv - mean.pow(2) - logv.exp())
-        KL_weight = anneal_function(step, x0, k)
-        return (closs_entropy_loss + KL_weight * KL_loss) / batch_size, closs_entropy_loss, KL_loss, KL_weight
-    return _f
 
 
 if __name__ == "__main__":
@@ -143,107 +116,46 @@ if __name__ == "__main__":
 
     sp = spm.SentencePieceProcessor(model_file=args.spm_model)
 
-    with open(args.hyper_param, 'rt') as f:
-        hyperp = json.load(f)
-
-    # n_vocab = hyperp["n_vocab"]
-    n_vocab = len(sp)
-    d_model = hyperp["d_model"]
-    n_hidden = hyperp["n_hidden"]
-    encoder_nlayers = hyperp["encoder_nlayers"]
-    decoder_nlayers = hyperp["decoder_nlayers"]
-    n_head = hyperp["n_head"]
-    dropout = hyperp["dropout"]
-    use_gpus = hyperp["use_gpus"]
-    model_type = hyperp["model_type"]
-    batch_size = hyperp["batch_size"]
-    optim_type = hyperp["optim_type"]
-    max_len = hyperp["max_len"]
-    anneal_k = hyperp["anneal_k"]
-    num_epoch = hyperp["num_epoch"]
-    x0_epoch = hyperp["x0_epoch"]
+    model_config = Config()
+    model_config.load_json(args.hyper_param)
+    model_config.n_vocab = len(sp)
 
     print(args.output_dir)
+    print("encoder = {}, decoder = {}".format(model_config.encoder_device, model_config.decoder_device))
 
-    # available_cuda = torch.cuda.is_available()
-    # encoder_device = decoder_device = torch.device('cuda' if (use_cuda and available_cuda) else 'cpu')
-    # decoder_device = torch.device('cuda' if (use_cuda and available_cuda) else 'cpu')
-    # encoder_device = torch.device('cpu')
-    device_num = torch.cuda.device_count()
-    if len(use_gpus) > 1:
-        if device_num > 1:
-            encoder_device = torch.device('cuda', use_gpus[0])
-            decoder_device = torch.device('cuda', use_gpus[1])
-            device_name = "cuda"
-        elif device_num == 1:
-            encoder_device = decoder_device = torch.device('cuda', use_gpus[0])
-            device_name = "cuda"
-        else:
-            encoder_device = decoder_device = torch.device('cpu')
-            device_name = "cpu"
-    elif len(use_gpus) == 1:
-        if device_num >= 1:
-            encoder_device = decoder_device = torch.device('cuda', use_gpus[0])
-            device_name = "cuda"
-        else:
-            encoder_device = decoder_device = torch.device('cpu')
-            device_name = "cpu"
-    else:
-        encoder_device = decoder_device = torch.device('cpu')
-        device_name = "cpu"
-
-    print("encoder = {}, decoder = {}".format(encoder_device, decoder_device))
-
-
-    if model_type == "gru":
-        encoder = Bert_Encoder_gru(args.bert_path)
-        loss_func = nn.CrossEntropyLoss(ignore_index=3)
-        vae = False
-        n_vocab = encoder.bert.config.vocab_size
-        d_model = encoder.bert.config.hidden_size
-        embedding_model = encoder.bert.get_input_embeddings()
-    elif model_type == "vae":
+    if model_config.model_type == "bert":
         encoder = Bert_Encoder_vae(args.bert_path)
-        loss_func = get_vae_loss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), decoder_device, batch_size)
-        vae = True
-        n_vocab = encoder.bert.config.vocab_size
-        d_model = encoder.bert.config.hidden_size
+        model_config.d_model = encoder.bert.config.hidden_size
         embedding_model = encoder.bert.get_input_embeddings()
-    elif model_type == "transformer_vae":
-        # embedding_model = Transformer_Embedding(n_vocab, d_model, dropout, max_len)
-        # encoder = transformer_Encoder(n_vocab, d_model, n_head, n_hidden, encoder_nlayers, embedding_model, nn.LayerNorm(d_model), dropout=dropout)
-        encoder = transformer_Encoder(n_vocab, d_model, n_head, n_hidden, encoder_nlayers, Transformer_Embedding(n_vocab, d_model, dropout, max_len), nn.LayerNorm(d_model), dropout=dropout)
-        loss_func = get_vae_loss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), decoder_device, batch_size, anneal_k, x0_epoch)
-        vae = True
+    elif model_config.model_type == "transformer":
+        # embedding_model = Transformer_Embedding(model_config)
+        # encoder = transformer_Encoder(model_config, embedding_model, nn.LayerNorm(model_config.d_model))
+        encoder = transformer_Encoder(model_config, Transformer_Embedding(model_config), nn.LayerNorm(model_config.d_model))
     else:
         print("model_type missmatch")
         exit()
 
+    train_dataset = txt_to_idlist(sp, args.input_file, 3)
+    train_dataloader = get_dataloader(train_dataset, model_config.batch_size, pad_index=3, bos_index=1, eos_index=2)
 
-    hyperp["n_vocab"] = n_vocab
-    hyperp["d_model"] = d_model
-    # hyperp["spm_model"] = args.spm_model
-    # hyperp["input_file"] = args.input_file
-    # hyperp["bert_path"] = args.bert_path
+    loss_func = VaeLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), model_config, len(train_dataloader)).forward
+    model_config.save_json(str(Path(args.output_dir) / "hyper_param.json"))
 
-    with open(str(Path(args.output_dir) / "hyper_param.json"), 'wt') as f:
-        json.dump(hyperp, f)
-
-    # decoder = transformer_Decoder(n_vocab, d_model, n_head, n_hidden, decoder_nlayers, embedding_model, nn.LayerNorm(d_model), dropout=dropout)
-    decoder = transformer_Decoder(n_vocab, d_model, n_head, n_hidden, decoder_nlayers, Transformer_Embedding(n_vocab, d_model, dropout, max_len), nn.LayerNorm(d_model), dropout=dropout)
+    # decoder = transformer_Decoder(model_config, embedding_model, nn.LayerNorm(model_config.d_model))
+    decoder = transformer_Decoder(model_config, Transformer_Embedding(model_config), nn.LayerNorm(model_config.d_model))
 
     # encoderのBERT内に組み込まれてる BertEmbeddings をdecoderで使うため、GPUへ送る順番は decoder->encoder
-    decoder = decoder.to(decoder_device)
-    encoder = encoder.to(encoder_device)
+    decoder = decoder.to(model_config.decoder_device)
+    encoder = encoder.to(model_config.encoder_device)
 
 
-    if optim_type == "Adam":
+    if model_config.optim_type == "Adam":
         encoder_opt = optim.Adam(encoder.parameters())
         decoder_opt = optim.Adam(decoder.parameters())
-    elif optim_type == "RAdam":
+    elif model_config.optim_type == "RAdam":
         encoder_opt = torch_optimizer.RAdam(encoder.parameters())
         decoder_opt = torch_optimizer.RAdam(decoder.parameters())
-    elif optim_type == "Yogi":
+    elif model_config.optim_type == "Yogi":
         encoder_opt = torch_optimizer.Yogi(encoder.parameters())
         decoder_opt = torch_optimizer.Yogi(decoder.parameters())
     else:
@@ -260,20 +172,18 @@ if __name__ == "__main__":
     else:
         true_epoch = 0
 
-    train_dataset = txt_to_idlist(sp, args.input_file, 3)
-    train_dataloader = get_dataloader(train_dataset, batch_size, pad_index=3, bos_index=1, eos_index=2)
 
     writer = SummaryWriter(log_dir=args.output_dir)
     with open(str(Path(args.output_dir) / "out_text.csv"), 'w', encoding='utf-8') as out:
         out.write("input_text,reconstract_text")
 
-    t_itr = tqdm.trange(num_epoch, leave=False, ncols=150)
+    t_itr = tqdm.trange(model_config.num_epoch, leave=False, ncols=150)
     for epoch in t_itr:
-        train_loss = train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, n_vocab, encoder_device, decoder_device, writer, epoch, vae, args.output_dir)
+        train_loss = train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, model_config, writer, epoch, args.output_dir)
         t_itr.set_postfix({"ave_loss":train_loss})
         writer.add_scalar('Loss/average', train_loss, epoch)
 
-        input_data, output_data = test(encoder, decoder, train_dataset, loss_func, n_vocab, encoder_device, decoder_device, vae=vae)
+        input_data, output_data = test(encoder, decoder, train_dataset, loss_func, model_config)
         output_text = "{}\n{}\n-> {}\n   {}".format(sp.decode(input_data), input_data, sp.decode(output_data), output_data)
         t_itr.write(output_text)
         writer.add_text("output_text", output_text, epoch)
@@ -288,6 +198,6 @@ if __name__ == "__main__":
                 'encoder_opt_state_dict': encoder_opt.state_dict(),
                 'decoder_opt_state_dict': decoder_opt.state_dict(),
                 'train_loss': train_loss},
-            str(Path(args.output_dir) / "{}_epoch{:03d}.pt".format(device_name, epoch)))
+            str(Path(args.output_dir) / "epoch{:03d}.pt".format(epoch)))
 
     writer.close()
