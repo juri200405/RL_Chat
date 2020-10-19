@@ -1,6 +1,14 @@
 import json
 import argparse
 from pathlib import Path
+import unicodedata
+
+def normalize_string(s):
+    '''
+    文s中に含まれる文字を正規化。
+    '''
+    s = ''.join(c for c in unicodedata.normalize('NFKC', s) if unicodedata.category(c) != 'Mn')
+    return s
 
 def make_uttrence_list(input_dir, output_file):
     utterances = []
@@ -16,7 +24,7 @@ def make_uttrence_list(input_dir, output_file):
                     ung_rate = 0
 
                 if ung_rate < 0.5:
-                    utterances.append(item["utterance"])
+                    utterances.append(normalize_string(item["utterance"]))
     with open(output_file, 'wt', encoding='utf-8') as f:
         f.write('\n'.join(utterances))
 
@@ -34,9 +42,9 @@ def make_dialog_database(input_dir, output_file):
                 if item["speaker"] == "S" and i == 0:
                     continue
                 elif item["speaker"] == "S":
-                    utt_pair["sys_utt"] = item["utterance"]
+                    utt_pair["sys_utt"] = normalize_string(item["utterance"])
                 elif item["speaker"] == "U":
-                    utt_pair["usr_utt"] = item["utterance"]
+                    utt_pair["usr_utt"] = normalize_string(item["utterance"])
 
                 if "sys_utt" in utt_pair and "usr_utt" in  utt_pair:
                     dialog.append(utt_pair)
