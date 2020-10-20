@@ -3,6 +3,7 @@ from pathlib import Path
 import random
 import json
 from itertools import chain
+import pickle
 
 import torch
 import torch.nn as nn
@@ -19,7 +20,6 @@ import sentencepiece as spm
 from transformers import BertModel
 # from torchviz import make_dot
 
-from bert_data import txt_to_idlist
 from bert_dataloader import get_dataloader
 from encoder_decoder import Bert_Encoder_vae, transformer_Decoder, Transformer_Embedding, transformer_Encoder
 from config import Config
@@ -136,7 +136,9 @@ if __name__ == "__main__":
         print("model_type missmatch")
         exit()
 
-    train_dataset = txt_to_idlist(sp, args.input_file, 3)
+    with open(args.input_file, 'rb') as f:
+        train_dataset = pickle.load(f)
+
     train_dataloader = get_dataloader(train_dataset, model_config.batch_size, pad_index=3, bos_index=1, eos_index=2, fix_len = model_config.max_len)
 
     loss_func = VaeLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), model_config, len(train_dataloader)).forward
