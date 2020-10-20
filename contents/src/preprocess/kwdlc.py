@@ -1,8 +1,16 @@
 import argparse
 from pathlib import Path
 import re
+import unicodedata
 
 import tqdm
+
+def normalize_string(s):
+    '''
+    文s中に含まれる文字を正規化。
+    '''
+    s = ''.join(c for c in unicodedata.normalize('NFKC', s) if unicodedata.category(c) != 'Mn')
+    return s
 
 def file2list(filename):
     lines = []
@@ -11,7 +19,7 @@ def file2list(filename):
             line = line.strip()
             m = re.match(r"# ", line)
             if m is None and len(line) > 1:
-                lines.append(line)
+                lines.append(normalize_string(line))
     return lines
 
 def process_dir(input_dir):
