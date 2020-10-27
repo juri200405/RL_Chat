@@ -23,7 +23,7 @@ from transformers import BertModel
 from bert_dataloader import get_dataloader
 from encoder_decoder import Bert_Encoder_vae, transformer_Decoder, Transformer_Embedding, transformer_Encoder
 from config import Config
-from losses import VaeLoss
+from losses import VaeLoss, MmdLoss
 
 
 def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, config, writer, epoch, output_dir=Path("")):
@@ -39,17 +39,19 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         label = sentence[:,1:]
 
         inputs = inputs.to(config.encoder_device)
-        inp_padding_mask = inp_padding_mask.to(config.encoder_device)
+
+        if config.model_type == "bert":
+            inp_padding_mask = inp_padding_mask.to(config.encoder_device)
+        else:
+            inp_padding_mask = tgt_padding_mask.to(config.encoder_device)
         # # embedding がencoderのdeviceにあるため、tgtはencoder_deviceに送る
         # tgt = tgt.to(config.encoder_device)
         tgt = tgt.to(config.decoder_device)
         label = label.to(config.decoder_device)
         tgt_padding_mask = tgt_padding_mask.to(config.decoder_device)
 
-        if config.model_type == "bert":
-            m, memory = encoder(inputs, attention_mask=inp_padding_mask)
-        else:
-            m, memory = encoder(inputs, attention_mask=tgt_padding_mask)
+        # m, memory = encoder(inputs, attention_mask=inp_padding_mask)
+        memory = encoder(inputs, attention_mask=inp_padding_mask)
         memory = memory.to(config.decoder_device)
         out = decoder(tgt, memory, tgt_padding_mask=tgt_padding_mask)
         # make_dot(out).render(str(output_dir + "graph"))
@@ -57,22 +59,25 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         out = out[:-1].contiguous().view(-1, out.shape[-1])
         label = label.transpose(0,1).contiguous().view(-1)
         
-        loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, m, epoch * len(train_itr) + n)
+        # loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, m, epoch * len(train_itr) + n)
+        loss, cross_entropy, mmd = loss_func(out, label, memory)
 
         encoder_opt.zero_grad()
         decoder_opt.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(encoder.parameters(), 0.5)
-        torch.nn.utils.clip_grad_norm_(decoder.parameters(), 0.5)
+        # torch.nn.utils.clip_grad_norm_(encoder.parameters(), 0.5)
+        # torch.nn.utils.clip_grad_norm_(decoder.parameters(), 0.5)
         encoder_opt.step()
         decoder_opt.step()
 
         losses.append(loss.item())
-        train_itr.set_postfix({"loss":loss.item(), "ce_loss":cross_entropy.item() , "weight":kl_weight, "kl_loss":kl_loss.item()})
+        # train_itr.set_postfix({"loss":loss.item(), "ce_loss":cross_entropy.item() , "weight":kl_weight, "kl_loss":kl_loss.item()})
+        train_itr.set_postfix({"loss":loss.item(), "ce_loss":cross_entropy.item() , "mmd":mmd.item()})
         writer.add_scalar('Loss/each',loss.item(), epoch * len(train_itr) + n)
         writer.add_scalar('Detail_Loss/cross_entropy', cross_entropy.item(), epoch * len(train_itr) + n)
-        writer.add_scalar('Detail_Loss/kl_loss', kl_loss.item(), epoch * len(train_itr) + n)
-        writer.add_scalar('Detail_Loss/kl_weight', kl_weight, epoch * len(train_itr) + n)
+        # writer.add_scalar('Detail_Loss/kl_loss', kl_loss.item(), epoch * len(train_itr) + n)
+        # writer.add_scalar('Detail_Loss/kl_weight', kl_weight, epoch * len(train_itr) + n)
+        writer.add_scalar('Detail_Loss/mmd', mmd.item(), epoch * len(train_itr) + n)
 
         n += 1
     return np.mean(losses)
@@ -141,7 +146,8 @@ if __name__ == "__main__":
 
     train_dataloader = get_dataloader(train_dataset, model_config.batch_size, pad_index=3, bos_index=1, eos_index=2, fix_len = model_config.max_len)
 
-    loss_func = VaeLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), model_config, len(train_dataloader)).forward
+    # loss_func = VaeLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), model_config, len(train_dataloader)).forward
+    loss_func = MmdLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), model_config).forward
     model_config.save_json(str(Path(args.output_dir) / "hyper_param.json"))
 
     # decoder = transformer_Decoder(model_config, embedding_model, nn.LayerNorm(model_config.d_model))

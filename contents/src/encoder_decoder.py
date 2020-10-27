@@ -74,6 +74,11 @@ class transformer_Encoder(nn.Module):
         self.memory2logv = nn.Linear(config.mlp_n_hidden, config.n_latent)
         self.tanh = nn.Tanh()
 
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5*logvar)
+        eps = torch.randn_like(std)
+        return mu + eps*std
+
     def forward(self, src, attention_mask=None):
         # src : (batch_size, seq_len)
 
@@ -86,13 +91,15 @@ class transformer_Encoder(nn.Module):
 
         memory = F.relu(self.fc(out))
         mean = self.memory2mean(memory)
-        logv = self.tanh(self.memory2logv(memory))
-        # logv = self.memory2logv(memory)
+        # logv = self.tanh(self.memory2logv(memory))
+        logv = self.memory2logv(memory)
 
-        v = torch.diag_embed(logv.exp())
-        m = MultivariateNormal(mean, covariance_matrix=v)
-        z = m.rsample()
-        return m, z
+        # v = torch.diag_embed(logv.exp())
+        # m = MultivariateNormal(mean, covariance_matrix=v)
+        # z = m.rsample()
+        # return m, z
+        z = self.reparameterize(mean, logv)
+        return z
 
 class transformer_Decoder(nn.Module):
     def __init__(self, config, embedding, norm=None):
