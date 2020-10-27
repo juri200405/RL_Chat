@@ -1,4 +1,6 @@
 from typing import List
+import pickle
+import argparse
 
 import sentencepiece as spm
 
@@ -17,4 +19,16 @@ def txt_to_idlist(spm_model, input_file: str, sample_num=0) -> List[List[int]]:
     return numericalized_lines
 
 if __name__ == '__main__':
-    print(txt_to_idlist("data/tomioka/spm/dbdc_and_meidai_8000.model", "test.txt", 3))
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-m", "--spm_model", required=True)
+    parser.add_argument("-i", "--input_file", required=True)
+    parser.add_argument("-o", "--output_file", required=True)
+    parser.add_argument("-n", "--n_sample", default=3, type=int)
+    args = parser.parse_args()
+
+    sp = spm.SentencePieceProcessor(model_file=args.spm_model)
+
+    train_dataset = txt_to_idlist(sp, args.input_file, args.n_sample)
+
+    with open(args.output_file, 'wb') as f:
+        pickle.dump(train_dataset, f)

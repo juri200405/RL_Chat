@@ -21,7 +21,6 @@ class VaeLoss:
 
     def forward(self, out, label, m, step):
         if self.target is None:
-            print("calc target")
             m_shape = m.mean.shape[-1]
             self.target = torch.distributions.multivariate_normal.MultivariateNormal(torch.zeros(m_shape, device=self.encoder_device), torch.eye(m_shape, device=self.encoder_device))
         closs_entropy_loss = self.label_loss_func(out, label)

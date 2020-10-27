@@ -23,13 +23,18 @@ class Transformer_Embedding(nn.Module):
         pe = pe.unsqueeze(0).transpose(0, 1)
         self.register_buffer('pe', pe)
 
+        # self.position_embedding = nn.Embedding(max_len, d_model)
+        # self.register_buffer("position_ids", torch.arange(max_len).expand((1,-1)))
+
     def forward(self, x):
         # x : (seq_len, batch_size)
+        # pos_id = self.position_ids[:, :x.shape[0]]
 
         x = self.embedding(x)
         # x : (seq_len, batch_size, d_model)
 
         x = x + self.pe[:x.size(0), :]
+        # x = x + self.position_embedding(pos_id).transpose(0,1)
         # x : (seq_len, batch_size, d_model)
         return self.dropout(x)
 
@@ -64,8 +69,10 @@ class transformer_Encoder(nn.Module):
         self.embedding = embedding
         self.transformer_encoder = nn.TransformerEncoder(nn.TransformerEncoderLayer(config.d_model, config.n_head, config.n_hidden, config.dropout), config.encoder_nlayers, norm)
         
-        self.memory2mean = nn.Linear(config.d_model, config.d_model)
-        self.memory2logv = nn.Linear(config.d_model, config.d_model)
+        self.fc = nn.Linear(config.max_len * config.d_model, config.mlp_n_hidden)
+        self.memory2mean = nn.Linear(config.mlp_n_hidden, config.n_latent)
+        self.memory2logv = nn.Linear(config.mlp_n_hidden, config.n_latent)
+        self.tanh = nn.Tanh()
 
     def forward(self, src, attention_mask=None):
         # src : (batch_size, seq_len)
@@ -73,16 +80,17 @@ class transformer_Encoder(nn.Module):
         src = self.embedding(src.transpose(0,1))
         # src : (seq_len, batch_size, d_model)
 
-        memory = self.transformer_encoder(src, src_key_padding_mask=attention_mask)
+        out = self.transformer_encoder(src, src_key_padding_mask=attention_mask)
         # out = (seq_len, batch_size, d_model)
+        out = torch.reshape(out.transpose(0,1), (out.shape[1], -1))
 
-        # hidden = torch.zeros(1, out.shape[1], self.gru.hidden_size, device=out.device)
-        # _, memory = self.gru(out, hidden)
-
+        memory = F.relu(self.fc(out))
         mean = self.memory2mean(memory)
-        logv = self.memory2logv(memory)
+        logv = self.tanh(self.memory2logv(memory))
+        # logv = self.memory2logv(memory)
 
-        m = MultivariateNormal(mean, torch.diag_embed(logv.exp()))
+        v = torch.diag_embed(logv.exp())
+        m = MultivariateNormal(mean, covariance_matrix=v)
         z = m.rsample()
         return m, z
 
@@ -93,15 +101,23 @@ class transformer_Decoder(nn.Module):
         self.transformer_decoder = nn.TransformerDecoder(nn.TransformerDecoderLayer(config.d_model, config.n_head, config.n_hidden, config.dropout), config.decoder_nlayers, norm)
         self.fc = nn.Linear(config.d_model, config.n_vocab)
 
-    def forward(self, tgt, memory, tgt_mask=None, memory_mask=None, tgt_padding_mask=None, memory_padding_mask=None):
+        self.latent2hidden = nn.Linear(config.n_latent, config.mlp_n_hidden)
+        self.hidden2memory = nn.Linear(config.mlp_n_hidden, config.max_len * config.d_model)
+
+    def forward(self, tgt, latent, tgt_mask=None, memory_mask=None, tgt_padding_mask=None, memory_padding_mask=None):
         # with torch.no_grad():
         #    tgt = self.embedding(tgt)
         #    tgt = tgt.transpose(0,1)
         tgt = self.embedding(tgt.transpose(0,1))
 
-        tgt = tgt.to(memory.device)
+        tgt = tgt.to(latent.device)
         if tgt_mask is None:
-            tgt_mask = self.generate_square_subsequent_mask(len(tgt)).to(memory.device)
+            tgt_mask = self.generate_square_subsequent_mask(len(tgt)).to(latent.device)
+
+        memory = self.hidden2memory(F.relu(self.latent2hidden(latent)))
+        # memory = self.latent2memory(latent)
+        memory = torch.reshape(memory, (tgt.shape[1], tgt.shape[0], tgt.shape[2])).transpose(0,1)
+
         output = self.transformer_decoder(tgt, memory, tgt_mask=tgt_mask, memory_mask=memory_mask, tgt_key_padding_mask=tgt_padding_mask, memory_key_padding_mask=memory_padding_mask)
         output = self.fc(output)
         return output

@@ -3,6 +3,7 @@ from pathlib import Path
 import random
 import json
 from itertools import chain
+import pickle
 
 import torch
 import torch.nn as nn
@@ -19,7 +20,6 @@ import sentencepiece as spm
 from transformers import BertModel
 # from torchviz import make_dot
 
-from bert_data import txt_to_idlist
 from bert_dataloader import get_dataloader
 from encoder_decoder import Bert_Encoder_vae, transformer_Decoder, Transformer_Embedding, transformer_Encoder
 from config import Config
@@ -30,7 +30,7 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
     encoder.train()
     decoder.train()
     losses = []
-    train_itr = tqdm.tqdm(train_dataloader, leave=False, ncols=150)
+    train_itr = tqdm.tqdm(train_dataloader, leave=False, ncols=180)
     n = 0
     for sentence, inp_padding_mask, tgt_padding_mask in train_itr:
     # for sentence, _ in train_itr:
@@ -62,11 +62,13 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         encoder_opt.zero_grad()
         decoder_opt.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(encoder.parameters(), 0.5)
+        torch.nn.utils.clip_grad_norm_(decoder.parameters(), 0.5)
         encoder_opt.step()
         decoder_opt.step()
 
         losses.append(loss.item())
-        train_itr.set_postfix({"loss":loss.item(), "weight":kl_weight})
+        train_itr.set_postfix({"loss":loss.item(), "ce_loss":cross_entropy.item() , "weight":kl_weight, "kl_loss":kl_loss.item()})
         writer.add_scalar('Loss/each',loss.item(), epoch * len(train_itr) + n)
         writer.add_scalar('Detail_Loss/cross_entropy', cross_entropy.item(), epoch * len(train_itr) + n)
         writer.add_scalar('Detail_Loss/kl_loss', kl_loss.item(), epoch * len(train_itr) + n)
@@ -81,6 +83,8 @@ def test(encoder, decoder, test_data, loss_func, config):
     data = random.choice(test_data)
 
     input_s = torch.tensor([1] + data + [2], device=config.encoder_device).unsqueeze(0)
+    pad = torch.full((1, config.max_len - input_s.shape[1]), 3, dtype=torch.long, device=config.encoder_device)
+    input_s = torch.cat((input_s, pad), dim=1)
     _, memory = encoder(input_s)
     memory = memory.to(config.decoder_device)
 
@@ -100,7 +104,6 @@ def test(encoder, decoder, test_data, loss_func, config):
         else:
             t_word = next_word
     return data, ids
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -133,8 +136,10 @@ if __name__ == "__main__":
         print("model_type missmatch")
         exit()
 
-    train_dataset = txt_to_idlist(sp, args.input_file, 3)
-    train_dataloader = get_dataloader(train_dataset, model_config.batch_size, pad_index=3, bos_index=1, eos_index=2)
+    with open(args.input_file, 'rb') as f:
+        train_dataset = pickle.load(f)
+
+    train_dataloader = get_dataloader(train_dataset, model_config.batch_size, pad_index=3, bos_index=1, eos_index=2, fix_len = model_config.max_len)
 
     loss_func = VaeLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), model_config, len(train_dataloader)).forward
     model_config.save_json(str(Path(args.output_dir) / "hyper_param.json"))
@@ -170,12 +175,11 @@ if __name__ == "__main__":
     else:
         true_epoch = 0
 
-
     writer = SummaryWriter(log_dir=args.output_dir)
     with open(str(Path(args.output_dir) / "out_text.csv"), 'w', encoding='utf-8') as out:
         out.write("input_text,reconstract_text")
 
-    t_itr = tqdm.trange(model_config.num_epoch, leave=False, ncols=150)
+    t_itr = tqdm.trange(model_config.num_epoch, leave=False, ncols=180)
     for epoch in t_itr:
         train_loss = train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, model_config, writer, epoch, args.output_dir)
         t_itr.set_postfix({"ave_loss":train_loss})
