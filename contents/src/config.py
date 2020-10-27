@@ -24,6 +24,7 @@ class Config:
         self._optim_type = "Adam"
 
         self._dropout = 0.1
+        self._lr = 0.001
 
         self._encoder_device = torch.device('cpu')
         self._decoder_device = torch.device('cpu')
@@ -145,6 +146,13 @@ class Config:
     @dropout.setter
     def dropout(self, value: float) -> None:
         self._dropout = value
+
+    @property
+    def lr(self) -> float:
+        return self._lr
+    @dropout.setter
+    def lr(self, value: float) -> None:
+        self._lr = value
 
     @property
     def encoder_device(self) -> torch.device:

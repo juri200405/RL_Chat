@@ -32,13 +32,15 @@ def get_dataloader(dataset, batchsize, pad_index=0, bos_index=1, eos_index=2, fi
                 dataset,
                 batch_size = batchsize,
                 sampler=RandomSampler(dataset),
-                collate_fn=get_collate_fn(pad_index, bos_index, eos_index, fix_max_len, fix_len)
+                collate_fn=get_collate_fn(pad_index, bos_index, eos_index, fix_max_len, fix_len),
+                num_workers=2, pin_memory=True
                 )
     else:
         dataloader = data.DataLoader(
                 dataset,
                 batch_size = batchsize,
                 shuffle=False,
-                collate_fn=get_collate_fn(pad_index, bos_index, eos_index, fix_max_len, fix_len)
+                collate_fn=get_collate_fn(pad_index, bos_index, eos_index, fix_max_len, fix_len),
+                num_workers=2, pin_memory=True
                 )
     return dataloader

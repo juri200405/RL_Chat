@@ -65,8 +65,8 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         encoder_opt.zero_grad()
         decoder_opt.zero_grad()
         loss.backward()
-        # torch.nn.utils.clip_grad_norm_(encoder.parameters(), 0.5)
-        # torch.nn.utils.clip_grad_norm_(decoder.parameters(), 0.5)
+        torch.nn.utils.clip_grad_norm_(encoder.parameters(), 0.5)
+        torch.nn.utils.clip_grad_norm_(decoder.parameters(), 0.5)
         encoder_opt.step()
         decoder_opt.step()
 
@@ -159,11 +159,11 @@ if __name__ == "__main__":
 
 
     if model_config.optim_type == "Adam":
-        encoder_opt = optim.Adam(encoder.parameters())
-        decoder_opt = optim.Adam(decoder.parameters())
+        encoder_opt = optim.Adam(encoder.parameters(), lr=model_config.lr)
+        decoder_opt = optim.Adam(decoder.parameters(), lr=model_config.lr)
     elif model_config.optim_type == "RAdam":
-        encoder_opt = torch_optimizer.RAdam(encoder.parameters())
-        decoder_opt = torch_optimizer.RAdam(decoder.parameters())
+        encoder_opt = torch_optimizer.RAdam(encoder.parameters(), lr=model_config.lr)
+        decoder_opt = torch_optimizer.RAdam(decoder.parameters(), lr=model_config.lr)
     elif model_config.optim_type == "Yogi":
         encoder_opt = torch_optimizer.Yogi(encoder.parameters())
         decoder_opt = torch_optimizer.Yogi(decoder.parameters())

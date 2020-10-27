@@ -33,6 +33,7 @@ class MmdLoss:
         self.label_loss_func = loss_func
         self.n_latent = config.n_latent
         self.decoder_device = config.decoder_device
+        self.batch_size = config.batch_size
 
     def kernel(self, x, y):
         x_size = x.size(0)
@@ -46,10 +47,10 @@ class MmdLoss:
         return torch.exp(-kernel_input) # (x_size, y_size)
 
     def forward(self, out, label, x):
-        y = torch.randn(200, self.n_latent, device=self.decoder_device)
+        y = torch.randn(self.batch_size, self.n_latent, device=self.decoder_device)
         xx_kernel = self.kernel(x, x)
         yy_kernel = self.kernel(y, y)
         xy_kernel = self.kernel(x, y)
         mmd = xx_kernel.mean() + yy_kernel.mean() - 2*xy_kernel.mean()
         closs_entropy_loss = self.label_loss_func(out, label)
-        return closs_entropy_loss + mmd, closs_entropy_loss, mmd
+        return (closs_entropy_loss + mmd) / self.batch_size, closs_entropy_loss, mmd
