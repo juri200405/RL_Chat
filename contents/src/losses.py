@@ -53,4 +53,4 @@ class MmdLoss:
         xy_kernel = self.kernel(x, y)
         mmd = xx_kernel.mean() + yy_kernel.mean() - 2*xy_kernel.mean()
         closs_entropy_loss = self.label_loss_func(out, label)
-        return (closs_entropy_loss + mmd) / self.batch_size, closs_entropy_loss, mmd
+        return closs_entropy_loss + mmd, closs_entropy_loss, mmd

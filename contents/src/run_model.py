@@ -163,7 +163,8 @@ if __name__ == "__main__":
     train_dataloader = get_dataloader(train_dataset, model_config.batch_size, pad_index=3, bos_index=1, eos_index=2, fix_len = model_config.max_len)
 
     # loss_func = VaeLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), model_config, len(train_dataloader)).forward
-    loss_func = MmdLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), model_config).forward
+    # loss_func = MmdLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), model_config).forward
+    loss_func = MmdLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='mean'), model_config).forward
     model_config.save_json(str(Path(args.output_dir) / "hyper_param.json"))
 
     # decoder = transformer_Decoder(model_config, embedding_model, nn.LayerNorm(model_config.d_model))
