@@ -26,7 +26,7 @@ from config import Config
 from losses import VaeLoss, MmdLoss
 
 
-def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, config, writer, epoch, output_dir=Path("")):
+def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, scaler, config, writer, epoch, output_dir=Path("")):
     encoder.train()
     decoder.train()
     losses = []
@@ -34,6 +34,9 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
     n = 0
     for sentence, inp_padding_mask, tgt_padding_mask in train_itr:
     # for sentence, _ in train_itr:
+        encoder_opt.zero_grad()
+        decoder_opt.zero_grad()
+
         inputs = sentence[:,:]
         tgt = sentence[:,:]
         label = sentence[:,1:]
@@ -50,34 +53,47 @@ def train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_op
         label = label.to(config.decoder_device)
         tgt_padding_mask = tgt_padding_mask.to(config.decoder_device)
 
-        # m, memory = encoder(inputs, attention_mask=inp_padding_mask)
-        memory = encoder(inputs, attention_mask=inp_padding_mask)
-        memory = memory.to(config.decoder_device)
-        out = decoder(tgt, memory, tgt_padding_mask=tgt_padding_mask)
-        # make_dot(out).render(str(output_dir + "graph"))
+        with torch.cuda.amp.autocast():
+            # m, memory = encoder(inputs, attention_mask=inp_padding_mask)
+            memory = encoder(inputs, attention_mask=inp_padding_mask)
+            memory = memory.to(config.decoder_device)
+            out = decoder(tgt, memory, tgt_padding_mask=tgt_padding_mask)
+            # make_dot(out).render(str(output_dir + "graph"))
 
-        out = out[:-1].contiguous().view(-1, out.shape[-1])
-        label = label.transpose(0,1).contiguous().view(-1)
-        
-        # loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, m, epoch * len(train_itr) + n)
-        loss, cross_entropy, mmd = loss_func(out, label, memory)
+            out = out[:-1].contiguous().view(-1, out.shape[-1])
+            label = label.transpose(0,1).contiguous().view(-1)
 
-        encoder_opt.zero_grad()
-        decoder_opt.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(encoder.parameters(), 0.5)
-        torch.nn.utils.clip_grad_norm_(decoder.parameters(), 0.5)
-        encoder_opt.step()
-        decoder_opt.step()
+            # loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, m, epoch * len(train_itr) + n)
+            loss, cross_entropy, mmd = loss_func(out, label, memory)
 
-        losses.append(loss.item())
+        # loss.backward()
+        scaler.scale(loss).backward()
+
+        # scaler.unscale_(encoder_opt)
+        # scaler.unscale_(decoder_opt)
+        # torch.nn.utils.clip_grad_norm_(encoder.parameters(), 1)
+        # torch.nn.utils.clip_grad_norm_(decoder.parameters(), 1)
+
+        # encoder_opt.step()
+        # decoder_opt.step()
+        scaler.step(encoder_opt)
+        scaler.step(decoder_opt)
+        scaler.update()
+
+        loss_item = loss.item()
+        cross_entropy_item = cross_entropy.item()
+        mmd_item = mmd.item()
+        loss = None
+        cross_entropy = None
+        mmd = None
+        losses.append(loss_item)
         # train_itr.set_postfix({"loss":loss.item(), "ce_loss":cross_entropy.item() , "weight":kl_weight, "kl_loss":kl_loss.item()})
-        train_itr.set_postfix({"loss":loss.item(), "ce_loss":cross_entropy.item() , "mmd":mmd.item()})
-        writer.add_scalar('Loss/each',loss.item(), epoch * len(train_itr) + n)
-        writer.add_scalar('Detail_Loss/cross_entropy', cross_entropy.item(), epoch * len(train_itr) + n)
+        train_itr.set_postfix({"loss":loss_item, "ce_loss":cross_entropy_item , "mmd":mmd_item})
+        writer.add_scalar('Loss/each',loss_item, epoch * len(train_itr) + n)
+        writer.add_scalar('Detail_Loss/cross_entropy', cross_entropy_item, epoch * len(train_itr) + n)
         # writer.add_scalar('Detail_Loss/kl_loss', kl_loss.item(), epoch * len(train_itr) + n)
         # writer.add_scalar('Detail_Loss/kl_weight', kl_weight, epoch * len(train_itr) + n)
-        writer.add_scalar('Detail_Loss/mmd', mmd.item(), epoch * len(train_itr) + n)
+        writer.add_scalar('Detail_Loss/mmd', mmd_item, epoch * len(train_itr) + n)
 
         n += 1
     return np.mean(losses)
@@ -185,9 +201,11 @@ if __name__ == "__main__":
     with open(str(Path(args.output_dir) / "out_text.csv"), 'w', encoding='utf-8') as out:
         out.write("input_text,reconstract_text")
 
+    scaler = torch.cuda.amp.GradScaler()
+
     t_itr = tqdm.trange(model_config.num_epoch, leave=False, ncols=180)
     for epoch in t_itr:
-        train_loss = train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, model_config, writer, epoch, args.output_dir)
+        train_loss = train(encoder, decoder, train_dataloader, loss_func, encoder_opt, decoder_opt, scaler, model_config, writer, epoch, args.output_dir)
         t_itr.set_postfix({"ave_loss":train_loss})
         writer.add_scalar('Loss/average', train_loss, epoch)
 

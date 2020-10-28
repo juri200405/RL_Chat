@@ -85,14 +85,14 @@ class Config:
     @property
     def mlp_n_hidden(self) -> int:
         return self._mlp_n_hidden
-    @max_len.setter
+    @mlp_n_hidden.setter
     def mlp_n_hidden(self, value: int) -> None:
         self._mlp_n_hidden = value
 
     @property
     def n_latent(self) -> int:
         return self._n_latent
-    @max_len.setter
+    @n_latent.setter
     def n_latent(self, value: int) -> None:
         self._n_latent = value
 
@@ -150,7 +150,7 @@ class Config:
     @property
     def lr(self) -> float:
         return self._lr
-    @dropout.setter
+    @lr.setter
     def lr(self, value: float) -> None:
         self._lr = value
 
@@ -179,16 +179,21 @@ class Config:
         self.encoder_nlayers = hyperp["encoder_nlayers"]
         self.decoder_nlayers = hyperp["decoder_nlayers"]
         self.n_head = hyperp["n_head"]
-        self.dropout = hyperp["dropout"]
-        self.model_type = hyperp["model_type"]
-        self.batch_size = hyperp["batch_size"]
-        self.optim_type = hyperp["optim_type"]
         self.max_len = hyperp["max_len"]
-        self.anneal_k = hyperp["anneal_k"]
-        self.num_epoch = hyperp["num_epoch"]
-        self.x0_epoch = hyperp["x0_epoch"]
         self.mlp_n_hidden = hyperp["mlp_n_hidden"]
         self.n_latent = hyperp["n_latent"]
+
+        self.anneal_k = hyperp["anneal_k"]
+        self.x0_epoch = hyperp["x0_epoch"]
+
+        self.batch_size = hyperp["batch_size"]
+        self.num_epoch = hyperp["num_epoch"]
+
+        self.model_type = hyperp["model_type"]
+        self.optim_type = hyperp["optim_type"]
+
+        self.dropout = hyperp["dropout"]
+        self.lr = hyperp["lr"]
 
         use_gpus = hyperp["use_gpus"]
 
@@ -224,16 +229,21 @@ class Config:
         hyperp["encoder_nlayers"] = self.encoder_nlayers
         hyperp["decoder_nlayers"] = self.decoder_nlayers
         hyperp["n_head"] = self.n_head
-        hyperp["dropout"] = self.dropout
-        hyperp["model_type"] = self.model_type
-        hyperp["batch_size"] = self.batch_size
-        hyperp["optim_type"] = self.optim_type
         hyperp["max_len"] = self.max_len
-        hyperp["anneal_k"] = self.anneal_k
-        hyperp["num_epoch"] = self.num_epoch
-        hyperp["x0_epoch"] = self.x0_epoch
         hyperp["mlp_n_hidden"] = self.mlp_n_hidden
         hyperp["n_latent"] = self.n_latent
+
+        hyperp["anneal_k"] = self.anneal_k
+        hyperp["x0_epoch"] = self.x0_epoch
+
+        hyperp["batch_size"] = self.batch_size
+        hyperp["num_epoch"] = self.num_epoch
+
+        hyperp["model_type"] = self.model_type
+        hyperp["optim_type"] = self.optim_type
+
+        hyperp["dropout"] = self.dropout
+        hyperp["lr"] = self.lr
 
         if self._device_name == "cpu":
             hyperp["use_gpus"] = []
