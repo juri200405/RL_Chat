@@ -7,7 +7,7 @@ dependencies:
   - tqdm
   - pytorch
   - torchvision
-  - cudatoolkit=10.1
+  - cudatoolkit=11.0
   - tensorboard
   - future
   - tornado

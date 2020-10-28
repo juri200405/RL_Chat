@@ -1,4 +1,4 @@
-FROM nvidia/cuda:10.1-base
+FROM nvidia/cuda:11.0-base
 
 SHELL ["/bin/bash", "-c"]
 
@@ -8,6 +8,8 @@ ARG U_ID
 ARG G_ID
 ARG USER_NAME
 ARG HOME_DIR
+
+ENV DEBIAN_FRONTEND=noninteractive
 
 # ソフトウェアインストール
 RUN apt update --fix-missing && \
@@ -59,5 +61,9 @@ RUN conda update -n base -c defaults conda
 COPY ./environment.yml ./
 RUN conda env create -f environment.yml
 RUN echo "conda activate pl" >> ~/.bashrc
+
+# RUN conda activate pl
+# RUN git clone https://github.com/NVIDIA/apex
+# RUN pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./apex
 
 ENV PYTHONPATH src
