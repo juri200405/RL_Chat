@@ -19,6 +19,8 @@ class Config:
 
         self._batch_size = 64
         self._num_epoch = 200
+        self._accumulate_size = 1
+        self._log_interval = 5000
 
         self._model_type = "transformer"
         self._optim_type = "Adam"
@@ -125,6 +127,20 @@ class Config:
         self._num_epoch = value
 
     @property
+    def accumulate_size(self) -> int:
+        return self._accumulate_size
+    @accumulate_size.setter
+    def accumulate_size(self, value: int) -> None:
+        self._accumulate_size = value
+
+    @property
+    def log_interval(self) -> int:
+        return self._log_interval
+    @log_interval.setter
+    def log_interval(self, value: int) -> None:
+        self._log_interval = value
+
+    @property
     def model_type(self) -> str:
         return self._model_type
     @model_type.setter
@@ -188,6 +204,8 @@ class Config:
 
         self.batch_size = hyperp["batch_size"]
         self.num_epoch = hyperp["num_epoch"]
+        self.accumulate_size = hyperp["accumulate_size"]
+        self.log_interval = hyperp["log_interval"]
 
         self.model_type = hyperp["model_type"]
         self.optim_type = hyperp["optim_type"]
@@ -238,6 +256,8 @@ class Config:
 
         hyperp["batch_size"] = self.batch_size
         hyperp["num_epoch"] = self.num_epoch
+        hyperp["accumulate_size"] = self.accumulate_size
+        hyperp["log_interval"] = self.log_interval
 
         hyperp["model_type"] = self.model_type
         hyperp["optim_type"] = self.optim_type
