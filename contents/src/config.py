@@ -16,6 +16,7 @@ class Config:
 
         self._anneal_k = 0.00005
         self._x0_epoch = 20
+        self._mmd_coefficient = 1
 
         self._batch_size = 64
         self._num_epoch = 200
@@ -113,6 +114,13 @@ class Config:
         self._x0_epoch = value
 
     @property
+    def mmd_coefficient(self) -> int:
+        return self._mmd_coefficient
+    @mmd_coefficient.setter
+    def mmd_coefficient(self, value: int) -> None:
+        self._mmd_coefficient = value
+
+    @property
     def batch_size(self) -> int:
         return self._batch_size
     @batch_size.setter
@@ -201,6 +209,7 @@ class Config:
 
         self.anneal_k = hyperp["anneal_k"]
         self.x0_epoch = hyperp["x0_epoch"]
+        self.mmd_coefficient = hyperp["mmd_coefficient"]
 
         self.batch_size = hyperp["batch_size"]
         self.num_epoch = hyperp["num_epoch"]
@@ -253,6 +262,7 @@ class Config:
 
         hyperp["anneal_k"] = self.anneal_k
         hyperp["x0_epoch"] = self.x0_epoch
+        hyperp["mmd_coefficient"] = self.mmd_coefficient
 
         hyperp["batch_size"] = self.batch_size
         hyperp["num_epoch"] = self.num_epoch

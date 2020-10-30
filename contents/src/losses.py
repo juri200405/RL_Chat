@@ -34,6 +34,7 @@ class MmdLoss:
         self.n_latent = config.n_latent
         self.decoder_device = config.decoder_device
         self.batch_size = config.batch_size
+        self.mmd_coefficient = config.mmd_coefficient
 
     def kernel(self, x, y):
         x_size = x.size(0)
@@ -53,4 +54,4 @@ class MmdLoss:
         xy_kernel = self.kernel(x, y)
         mmd = xx_kernel.mean() + yy_kernel.mean() - 2*xy_kernel.mean()
         closs_entropy_loss = self.label_loss_func(out, label)
-        return closs_entropy_loss + mmd, closs_entropy_loss, mmd
+        return closs_entropy_loss + (self.mmd_coefficient * mmd), closs_entropy_loss, mmd
