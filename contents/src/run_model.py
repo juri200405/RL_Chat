@@ -43,9 +43,9 @@ class Trainer:
             self.config.d_model = self.encoder.bert.config.hidden_size
             embedding_model = self.encoder.bert.get_input_embeddings()
         elif self.config.model_type == "transformer":
-            # embedding_model = Transformer_Embedding(self.config)
-            # self.encoder = transformer_Encoder(self.config, embedding_model, nn.LayerNorm(self.config.d_model))
-            self.encoder = transformer_Encoder(self.config, Transformer_Embedding(self.config), nn.LayerNorm(self.config.d_model))
+            embedding_model = Transformer_Embedding(self.config)
+            self.encoder = transformer_Encoder(self.config, embedding_model, nn.LayerNorm(self.config.d_model))
+            # self.encoder = transformer_Encoder(self.config, Transformer_Embedding(self.config), nn.LayerNorm(self.config.d_model))
         else:
             print("model_type missmatch")
             exit()
@@ -60,8 +60,8 @@ class Trainer:
         self.loss_func = MmdLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='mean'), self.config).forward
         self.config.save_json(str(self.output_dir / "hyper_param.json"))
 
-        # self.decoder = transformer_Decoder(self.config, embedding_model, nn.LayerNorm(self.config.d_model))
-        self.decoder = transformer_Decoder(self.config, Transformer_Embedding(self.config), nn.LayerNorm(self.config.d_model))
+        self.decoder = transformer_Decoder(self.config, embedding_model, nn.LayerNorm(self.config.d_model))
+        # self.decoder = transformer_Decoder(self.config, Transformer_Embedding(self.config), nn.LayerNorm(self.config.d_model))
 
         # encoderのBERT内に組み込まれてる BertEmbeddings をdecoderで使うため、GPUへ送る順番は decoder->encoder
         self.decoder.to(self.config.decoder_device)
@@ -102,14 +102,14 @@ class Trainer:
             f.write("\n{}".format(text))
 
     def run(self):
-        # scaler = torch.cuda.amp.GradScaler(enabled=False)
-        scaler = torch.cuda.amp.GradScaler(enabled=True)
+        scaler = torch.cuda.amp.GradScaler(enabled=False)
+        # scaler = torch.cuda.amp.GradScaler(enabled=True)
 
         t_itr = tqdm.trange(self.config.num_epoch, leave=False, ncols=180)
         for epoch in t_itr:
             train_loss = self.train(scaler, epoch)
             t_itr.set_postfix({"ave_loss":train_loss})
-            writer.add_scalar('Loss/average', train_loss, epoch)
+            self.writer.add_scalar('Loss/average', train_loss, epoch)
 
             input_data, output_data = self.test()
             output_text = '"{}","{}"'.format(self.sp.decode(input_data), self.sp.decode(output_data))
@@ -232,7 +232,7 @@ class Trainer:
                         'encoder_opt_state_dict': self.encoder_opt.state_dict(),
                         'decoder_opt_state_dict': self.decoder_opt.state_dict(),
                         'train_loss': np.mean(losses)},
-                    str(self.output_dir / "{:03d}k.pt".format(n//1000)))
+                    str(self.output_dir / "{:04d}k.pt".format(n//1000)))
 
                 input_ids, ids = self.test()
                 output_text = '"{}","{}"'.format(self.sp.decode(input_ids), self.sp.decode(ids))
