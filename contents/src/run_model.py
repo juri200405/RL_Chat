@@ -138,9 +138,9 @@ class Trainer:
             inp_padding_mask = inp_padding_mask.to(self.config.encoder_device)
         else:
             inp_padding_mask = tgt_padding_mask.to(self.config.encoder_device)
-        # # embedding がencoderのdeviceにあるため、tgtはencoder_deviceに送る
-        # tgt = tgt.to(self.config.encoder_device)
-        tgt = tgt.to(self.config.decoder_device)
+        # embedding がencoderのdeviceにあるため、tgtはencoder_deviceに送る
+        tgt = tgt.to(self.config.encoder_device)
+        # tgt = tgt.to(self.config.decoder_device)
         label = label.to(self.config.decoder_device)
         tgt_padding_mask = tgt_padding_mask.to(self.config.decoder_device)
 
@@ -263,8 +263,8 @@ class Trainer:
         return data, ids
 
     def generate_sentence(self, memory):
-        # tgt = torch.full((1, self.config.max_len), 0, dtype=torch.long, device=self.config.encoder_device)
-        tgt = torch.full((1, self.config.max_len), 0, dtype=torch.long, device=self.config.decoder_device)
+        tgt = torch.full((1, self.config.max_len), 0, dtype=torch.long, device=self.config.encoder_device)
+        # tgt = torch.full((1, self.config.max_len), 0, dtype=torch.long, device=self.config.decoder_device)
         tgt_key_padding_mask = torch.full((1, self.config.max_len), True, dtype=torch.bool, device=self.config.decoder_device)
         t_word = 1 # <s>
         ids = []
