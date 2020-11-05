@@ -116,11 +116,11 @@ class Trainer:
             self.text_logger(t_itr, "epoch_output_text", output_text, epoch)
 
             torch.save({
-                    'epoch': true_epoch + epoch,
-                    'encoder_state_dict': encoder.state_dict(),
-                    'decoder_state_dict': decoder.state_dict(),
-                    'encoder_opt_state_dict': encoder_opt.state_dict(),
-                    'decoder_opt_state_dict': decoder_opt.state_dict(),
+                    'epoch': self.true_epoch + epoch,
+                    'encoder_state_dict': self.encoder.state_dict(),
+                    'decoder_state_dict': self.decoder.state_dict(),
+                    'encoder_opt_state_dict': self.encoder_opt.state_dict(),
+                    'decoder_opt_state_dict': self.decoder_opt.state_dict(),
                     'train_loss': train_loss},
                 str(self.output_dir / "epoch{:03d}.pt".format(epoch)))
 
