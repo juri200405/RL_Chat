@@ -3,13 +3,15 @@ import pickle
 import argparse
 
 import sentencepiece as spm
+import tqdm
 
 def txt_to_idlist(spm_model, input_file: str, sample_num=0, max_len=None) -> List[List[int]]:
     sp = spm_model
 
     numericalized_lines = []
     with open(input_file, 'rt', encoding='utf-8') as f:
-        for line in f:
+        t_itr = tqdm.tqdm(f)
+        for line in t_itr:
             if sample_num == 0:
                 tokens = sp.encode(line)
                 if max_len is None or len(tokens) <= max_len:
