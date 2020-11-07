@@ -218,11 +218,11 @@ class Trainer:
             losses.append(loss_item)
             # train_itr.set_postfix({"loss":loss.item(), "ce_loss":cross_entropy.item() , "weight":kl_weight, "kl_loss":kl_loss.item()})
             train_itr.set_postfix({"loss":loss_item, "ce_loss":cross_entropy_item , "mmd":mmd_item})
-            self.writer.add_scalar('Loss/each',loss_item, epoch * len(train_itr) + n)
-            self.writer.add_scalar('Detail_Loss/cross_entropy', cross_entropy_item, epoch * len(train_itr) + n)
-            # self.writer.add_scalar('Detail_Loss/kl_loss', kl_loss.item(), epoch * len(train_itr) + n)
-            # self.writer.add_scalar('Detail_Loss/kl_weight', kl_weight, epoch * len(train_itr) + n)
-            self.writer.add_scalar('Detail_Loss/mmd', mmd_item, epoch * len(train_itr) + n)
+            self.writer.add_scalar('Loss/each',loss_item, n)
+            self.writer.add_scalar('Detail_Loss/cross_entropy', cross_entropy_item, n)
+            # self.writer.add_scalar('Detail_Loss/kl_loss', kl_loss.item(), n)
+            # self.writer.add_scalar('Detail_Loss/kl_weight', kl_weight, n)
+            self.writer.add_scalar('Detail_Loss/mmd', mmd_item, n)
 
             if n % self.config.log_interval == 0:
                 torch.save({
