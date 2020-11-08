@@ -29,6 +29,7 @@ from losses import VaeLoss, MmdLoss
 class Trainer:
     def __init__(self, args):
         self.output_dir = Path(args.output_dir)
+        self.writer = SummaryWriter(log_dir=args.output_dir)
         self.sp = spm.SentencePieceProcessor(model_file=args.spm_model)
 
         self.config = Config()
@@ -91,7 +92,6 @@ class Trainer:
         else:
             self.true_epoch = 0
 
-        self.writer = SummaryWriter(log_dir=args.output_dir)
         with open(str(self.output_dir / "epoch_out_text.csv"), 'w', encoding='utf-8') as out:
             out.write("input_text,reconstract_text")
 
@@ -105,7 +105,8 @@ class Trainer:
         scaler = torch.cuda.amp.GradScaler(enabled=False)
         # scaler = torch.cuda.amp.GradScaler(enabled=True)
 
-        t_itr = tqdm.trange(self.config.num_epoch, leave=False, ncols=180)
+        self.out = open(str(self.output_dir / "log"), 'wt', encoding='utf-8')
+        t_itr = tqdm.trange(self.config.num_epoch, leave=False, ncols=180, file=self.out)
         for epoch in t_itr:
             train_loss = self.train(scaler, epoch)
             t_itr.set_postfix({"ave_loss":train_loss})
@@ -125,6 +126,7 @@ class Trainer:
                 str(self.output_dir / "epoch{:03d}.pt".format(epoch)))
 
         self.writer.close()
+        self.out.close()
 
     def train_process(self, sentence, inp_padding_mask, tgt_padding_mask, scaler, step):
 
@@ -210,7 +212,7 @@ class Trainer:
         self.encoder.train()
         self.decoder.train()
         losses = []
-        train_itr = tqdm.tqdm(self.train_dataloader, leave=False, ncols=180)
+        train_itr = tqdm.tqdm(self.train_dataloader, leave=False, ncols=180, file=self.out)
         n = epoch * len(train_itr)
         for sentence, inp_padding_mask, tgt_padding_mask in train_itr:
         # for sentence, _ in train_itr:
