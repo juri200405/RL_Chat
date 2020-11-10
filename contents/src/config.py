@@ -16,14 +16,18 @@ class Config:
 
         self._anneal_k = 0.00005
         self._x0_epoch = 20
+        self._mmd_coefficient = 1
 
         self._batch_size = 64
         self._num_epoch = 200
+        self._accumulate_size = 1
+        self._log_interval = 5000
 
         self._model_type = "transformer"
         self._optim_type = "Adam"
 
         self._dropout = 0.1
+        self._lr = 0.001
 
         self._encoder_device = torch.device('cpu')
         self._decoder_device = torch.device('cpu')
@@ -84,14 +88,14 @@ class Config:
     @property
     def mlp_n_hidden(self) -> int:
         return self._mlp_n_hidden
-    @max_len.setter
+    @mlp_n_hidden.setter
     def mlp_n_hidden(self, value: int) -> None:
         self._mlp_n_hidden = value
 
     @property
     def n_latent(self) -> int:
         return self._n_latent
-    @max_len.setter
+    @n_latent.setter
     def n_latent(self, value: int) -> None:
         self._n_latent = value
 
@@ -110,6 +114,13 @@ class Config:
         self._x0_epoch = value
 
     @property
+    def mmd_coefficient(self) -> int:
+        return self._mmd_coefficient
+    @mmd_coefficient.setter
+    def mmd_coefficient(self, value: int) -> None:
+        self._mmd_coefficient = value
+
+    @property
     def batch_size(self) -> int:
         return self._batch_size
     @batch_size.setter
@@ -122,6 +133,20 @@ class Config:
     @num_epoch.setter
     def num_epoch(self, value: int) -> None:
         self._num_epoch = value
+
+    @property
+    def accumulate_size(self) -> int:
+        return self._accumulate_size
+    @accumulate_size.setter
+    def accumulate_size(self, value: int) -> None:
+        self._accumulate_size = value
+
+    @property
+    def log_interval(self) -> int:
+        return self._log_interval
+    @log_interval.setter
+    def log_interval(self, value: int) -> None:
+        self._log_interval = value
 
     @property
     def model_type(self) -> str:
@@ -145,6 +170,13 @@ class Config:
     @dropout.setter
     def dropout(self, value: float) -> None:
         self._dropout = value
+
+    @property
+    def lr(self) -> float:
+        return self._lr
+    @lr.setter
+    def lr(self, value: float) -> None:
+        self._lr = value
 
     @property
     def encoder_device(self) -> torch.device:
@@ -171,16 +203,24 @@ class Config:
         self.encoder_nlayers = hyperp["encoder_nlayers"]
         self.decoder_nlayers = hyperp["decoder_nlayers"]
         self.n_head = hyperp["n_head"]
-        self.dropout = hyperp["dropout"]
-        self.model_type = hyperp["model_type"]
-        self.batch_size = hyperp["batch_size"]
-        self.optim_type = hyperp["optim_type"]
         self.max_len = hyperp["max_len"]
-        self.anneal_k = hyperp["anneal_k"]
-        self.num_epoch = hyperp["num_epoch"]
-        self.x0_epoch = hyperp["x0_epoch"]
         self.mlp_n_hidden = hyperp["mlp_n_hidden"]
         self.n_latent = hyperp["n_latent"]
+
+        self.anneal_k = hyperp["anneal_k"]
+        self.x0_epoch = hyperp["x0_epoch"]
+        self.mmd_coefficient = hyperp["mmd_coefficient"]
+
+        self.batch_size = hyperp["batch_size"]
+        self.num_epoch = hyperp["num_epoch"]
+        self.accumulate_size = hyperp["accumulate_size"]
+        self.log_interval = hyperp["log_interval"]
+
+        self.model_type = hyperp["model_type"]
+        self.optim_type = hyperp["optim_type"]
+
+        self.dropout = hyperp["dropout"]
+        self.lr = hyperp["lr"]
 
         use_gpus = hyperp["use_gpus"]
 
@@ -216,16 +256,24 @@ class Config:
         hyperp["encoder_nlayers"] = self.encoder_nlayers
         hyperp["decoder_nlayers"] = self.decoder_nlayers
         hyperp["n_head"] = self.n_head
-        hyperp["dropout"] = self.dropout
-        hyperp["model_type"] = self.model_type
-        hyperp["batch_size"] = self.batch_size
-        hyperp["optim_type"] = self.optim_type
         hyperp["max_len"] = self.max_len
-        hyperp["anneal_k"] = self.anneal_k
-        hyperp["num_epoch"] = self.num_epoch
-        hyperp["x0_epoch"] = self.x0_epoch
         hyperp["mlp_n_hidden"] = self.mlp_n_hidden
         hyperp["n_latent"] = self.n_latent
+
+        hyperp["anneal_k"] = self.anneal_k
+        hyperp["x0_epoch"] = self.x0_epoch
+        hyperp["mmd_coefficient"] = self.mmd_coefficient
+
+        hyperp["batch_size"] = self.batch_size
+        hyperp["num_epoch"] = self.num_epoch
+        hyperp["accumulate_size"] = self.accumulate_size
+        hyperp["log_interval"] = self.log_interval
+
+        hyperp["model_type"] = self.model_type
+        hyperp["optim_type"] = self.optim_type
+
+        hyperp["dropout"] = self.dropout
+        hyperp["lr"] = self.lr
 
         if self._device_name == "cpu":
             hyperp["use_gpus"] = []

@@ -26,6 +26,9 @@ class Transformer_Embedding(nn.Module):
         # self.position_embedding = nn.Embedding(max_len, d_model)
         # self.register_buffer("position_ids", torch.arange(max_len).expand((1,-1)))
 
+    def position_encode(self, x):
+        return x + self.pe[:x.size(0), :]
+
     def forward(self, x):
         # x : (seq_len, batch_size)
         # pos_id = self.position_ids[:, :x.shape[0]]
@@ -33,7 +36,7 @@ class Transformer_Embedding(nn.Module):
         x = self.embedding(x)
         # x : (seq_len, batch_size, d_model)
 
-        x = x + self.pe[:x.size(0), :]
+        x = self.position_encode(x)
         # x = x + self.position_embedding(pos_id).transpose(0,1)
         # x : (seq_len, batch_size, d_model)
         return self.dropout(x)
@@ -71,8 +74,14 @@ class transformer_Encoder(nn.Module):
         
         self.fc = nn.Linear(config.max_len * config.d_model, config.mlp_n_hidden)
         self.memory2mean = nn.Linear(config.mlp_n_hidden, config.n_latent)
-        self.memory2logv = nn.Linear(config.mlp_n_hidden, config.n_latent)
-        self.tanh = nn.Tanh()
+        # self.memory2logv = nn.Linear(config.mlp_n_hidden, config.n_latent)
+        # self.tanh = nn.Tanh()
+        self.relu = nn.LeakyReLU()
+
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5*logvar)
+        eps = torch.randn_like(std)
+        return mu + eps*std
 
     def forward(self, src, attention_mask=None):
         # src : (batch_size, seq_len)
@@ -84,15 +93,20 @@ class transformer_Encoder(nn.Module):
         # out = (seq_len, batch_size, d_model)
         out = torch.reshape(out.transpose(0,1), (out.shape[1], -1))
 
-        memory = F.relu(self.fc(out))
+        memory = self.relu(self.fc(out))
         mean = self.memory2mean(memory)
-        logv = self.tanh(self.memory2logv(memory))
+        # logv = self.tanh(self.memory2logv(memory))
         # logv = self.memory2logv(memory)
 
-        v = torch.diag_embed(logv.exp())
-        m = MultivariateNormal(mean, covariance_matrix=v)
-        z = m.rsample()
-        return m, z
+        # v = torch.diag_embed(logv.exp())
+        # m = MultivariateNormal(mean, covariance_matrix=v)
+        # z = m.rsample()
+        # return m, z
+
+        # z = self.reparameterize(mean, logv)
+        # return z
+
+        return mean
 
 class transformer_Decoder(nn.Module):
     def __init__(self, config, embedding, norm=None):
@@ -103,6 +117,7 @@ class transformer_Decoder(nn.Module):
 
         self.latent2hidden = nn.Linear(config.n_latent, config.mlp_n_hidden)
         self.hidden2memory = nn.Linear(config.mlp_n_hidden, config.max_len * config.d_model)
+        self.relu = nn.LeakyReLU()
 
     def forward(self, tgt, latent, tgt_mask=None, memory_mask=None, tgt_padding_mask=None, memory_padding_mask=None):
         # with torch.no_grad():
@@ -114,7 +129,7 @@ class transformer_Decoder(nn.Module):
         if tgt_mask is None:
             tgt_mask = self.generate_square_subsequent_mask(len(tgt)).to(latent.device)
 
-        memory = self.hidden2memory(F.relu(self.latent2hidden(latent)))
+        memory = self.hidden2memory(self.relu(self.latent2hidden(latent)))
         # memory = self.latent2memory(latent)
         memory = torch.reshape(memory, (tgt.shape[1], tgt.shape[0], tgt.shape[2])).transpose(0,1)
 
