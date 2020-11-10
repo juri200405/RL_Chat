@@ -102,8 +102,8 @@ class Trainer:
             f.write("\n{}".format(text))
 
     def run(self):
-        scaler = torch.cuda.amp.GradScaler(enabled=False)
-        # scaler = torch.cuda.amp.GradScaler(enabled=True)
+        # scaler = torch.cuda.amp.GradScaler(enabled=False)
+        scaler = torch.cuda.amp.GradScaler(enabled=True)
 
         self.out = open(str(self.output_dir / "log"), 'wt', encoding='utf-8')
         t_itr = tqdm.trange(self.config.num_epoch, leave=False, ncols=180, file=self.out)
