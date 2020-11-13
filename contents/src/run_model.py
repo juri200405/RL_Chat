@@ -29,7 +29,8 @@ from losses import VaeLoss, MmdLoss
 class Trainer:
     def __init__(self, args):
         self.output_dir = Path(args.output_dir)
-        self.writer = SummaryWriter(log_dir=args.output_dir)
+        self.log_dir = Path(args.log_dir)
+        self.writer = SummaryWriter(log_dir=args.log_dir)
         self.sp = spm.SentencePieceProcessor(model_file=args.spm_model)
 
         self.config = Config()
@@ -102,10 +103,10 @@ class Trainer:
             f.write("\n{}".format(text))
 
     def run(self):
-        # scaler = torch.cuda.amp.GradScaler(enabled=False)
-        scaler = torch.cuda.amp.GradScaler(enabled=True)
+        scaler = torch.cuda.amp.GradScaler(enabled=False)
+        # scaler = torch.cuda.amp.GradScaler(enabled=True)
 
-        self.out = open(str(self.output_dir / "log"), 'wt', encoding='utf-8')
+        self.out = open(str(self.log_dir / "log"), 'wt', encoding='utf-8')
         t_itr = tqdm.trange(self.config.num_epoch, leave=False, ncols=180, file=self.out)
         for epoch in t_itr:
             train_loss = self.train(scaler, epoch)
@@ -288,6 +289,7 @@ if __name__ == "__main__":
     parser.add_argument("-m", "--spm_model", required=True)
     parser.add_argument("-i", "--input_file", required=True)
     parser.add_argument("-o", "--output_dir", required=True)
+    parser.add_argument("-l", "--log_dir", required=True)
     parser.add_argument("-p", "--hyper_param", required=True)
     parser.add_argument("-b", "--bert_path", required=True)
     parser.add_argument("--pt_file")
