@@ -56,12 +56,10 @@ class Trainer:
             self.train_dataset = pickle.load(f)
 
         self.train_dataloader = get_dataloader(self.train_dataset, self.config.batch_size, pad_index=3, bos_index=1, eos_index=2, fix_len = self.config.max_len)
-        # self.train_dataloader = get_dataloader(self.train_dataset, self.config.batch_size, pad_index=2, bos_index=1, eos_index=2, fix_len = self.config.max_len)
 
         # self.loss_func = VaeLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), self.config, len(train_dataloader)).forward
         # self.loss_func = MmdLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), self.config).forward
-        # self.loss_func = MmdLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='mean'), self.config).forward
-        self.loss_func = MmdLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='mean'), nn.CrossEntropyLoss(reduction='mean'), self.config).forward
+        self.loss_func = MmdLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='mean'), self.config).forward
         self.config.save_json(str(self.output_dir / "hyper_param.json"))
 
         self.decoder = transformer_Decoder(self.config, embedding_model, nn.LayerNorm(self.config.d_model))
@@ -161,7 +159,7 @@ class Trainer:
                 label = label.transpose(0,1).contiguous().view(-1)
 
                 # loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, m, epoch * len(train_itr) + n)
-                loss, cross_entropy, eos_loss, mmd = self.loss_func(out, label, memory)
+                loss, cross_entropy, mmd = self.loss_func(out, label, memory)
                 loss = loss / self.config.accumulate_size
 
             scaler.scale(loss).backward()
@@ -190,7 +188,7 @@ class Trainer:
             label = label.transpose(0,1).contiguous().view(-1)
 
             # loss, cross_entropy, kl_loss, kl_weight = self.loss_func(out, label, m, step)
-            loss, cross_entropy, eos_loss, mmd = self.loss_func(out, label, memory)
+            loss, cross_entropy, mmd = self.loss_func(out, label, memory)
             loss = loss / self.config.accumulate_size
 
             loss.backward()
@@ -204,14 +202,12 @@ class Trainer:
 
         loss_item = loss.item()
         cross_entropy_item = cross_entropy.item()
-        eos_loss_item = eos_loss.item()
         mmd_item = mmd.item()
         cross_entropy = None
-        eos_loss = None
         mmd = None
         loss = None
 
-        return loss_item, cross_entropy_item, eos_loss_item, mmd_item
+        return loss_item, cross_entropy_item, mmd_item
 
     def train(self, scaler, epoch):
         self.encoder.train()
@@ -221,13 +217,12 @@ class Trainer:
         n = epoch * len(train_itr)
         for sentence, inp_padding_mask, tgt_padding_mask in train_itr:
         # for sentence, _ in train_itr:
-            loss_item, cross_entropy_item, eos_loss_item, mmd_item = self.train_process(sentence, inp_padding_mask, tgt_padding_mask, scaler, n)
+            loss_item, cross_entropy_item, mmd_item = self.train_process(sentence, inp_padding_mask, tgt_padding_mask, scaler, n)
             losses.append(loss_item)
             # train_itr.set_postfix({"loss":loss.item(), "ce_loss":cross_entropy.item() , "weight":kl_weight, "kl_loss":kl_loss.item()})
-            train_itr.set_postfix({"loss":loss_item, "ce_loss":cross_entropy_item, "eos_loss":eos_loss_item, "mmd":mmd_item})
+            train_itr.set_postfix({"loss":loss_item, "ce_loss":cross_entropy_item , "mmd":mmd_item})
             self.writer.add_scalar('Loss/each',loss_item, n)
             self.writer.add_scalar('Detail_Loss/cross_entropy', cross_entropy_item, n)
-            self.writer.add_scalar('Detail_Loss/eos_loss', eos_loss_item, n)
             # self.writer.add_scalar('Detail_Loss/kl_loss', kl_loss.item(), n)
             # self.writer.add_scalar('Detail_Loss/kl_weight', kl_weight, n)
             self.writer.add_scalar('Detail_Loss/mmd', mmd_item, n)

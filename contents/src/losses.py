@@ -29,9 +29,8 @@ class VaeLoss:
         return (closs_entropy_loss + KL_weight * KL_loss) / self.batch_size, closs_entropy_loss, KL_loss, KL_weight
 
 class MmdLoss:
-    def __init__(self, loss_func, eosloss_func, config):
+    def __init__(self, loss_func, config):
         self.label_loss_func = loss_func
-        self.eos_loss_func = eosloss_func
         self.n_latent = config.n_latent
         self.decoder_device = config.decoder_device
         self.batch_size = config.batch_size
@@ -55,5 +54,4 @@ class MmdLoss:
         xy_kernel = self.kernel(x, y)
         mmd = xx_kernel.mean() + yy_kernel.mean() - 2*xy_kernel.mean()
         closs_entropy_loss = self.label_loss_func(out, label)
-        eos_loss = self.eos_loss_func(out, label)
-        return closs_entropy_loss + eos_loss + (self.mmd_coefficient * mmd), closs_entropy_loss, eos_loss, mmd
+        return closs_entropy_loss + (self.mmd_coefficient * mmd), closs_entropy_loss, mmd
