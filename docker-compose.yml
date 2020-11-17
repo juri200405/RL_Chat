@@ -15,7 +15,7 @@ services:
                                 - U_ID=${U_ID}
                                 - G_ID=${G_ID}
                                 - HOME_DIR=${HOME_DIR}
-                shm_size: 4G
+                shm_size: 16G
                 volumes:
                         - ./contents:${HOME}/contents
                 runtime: nvidia
