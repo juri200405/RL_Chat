@@ -61,8 +61,8 @@ class Trainer:
         # self.loss_func = MmdLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), self.config).forward
         # self.loss_func = MmdLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='mean'), self.config).forward
         cross_entropy_weight = torch.ones(self.config.n_vocab, device=self.config.decoder_device)
-        cross_entropy_weight[2] = 10
-        cross_entropy_weight[3] = 0.1
+        cross_entropy_weight[2] = 20
+        cross_entropy_weight[3] = 0.05
         # self.loss_func = MmdLoss(nn.CrossEntropyLoss(weight=cross_entropy_weight, ignore_index=3, reduction='mean'), self.config).forward
         self.loss_func = MmdLoss(nn.CrossEntropyLoss(weight=cross_entropy_weight, reduction='mean'), self.config).forward
         self.config.save_json(str(self.output_dir / "hyper_param.json"))
