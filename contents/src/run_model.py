@@ -108,9 +108,6 @@ class Trainer:
             f.write("\n{}".format(text))
 
     def run(self):
-        scaler = torch.cuda.amp.GradScaler(enabled=False)
-        # scaler = torch.cuda.amp.GradScaler(enabled=True)
-
         self.out = open(str(self.log_dir / "log"), 'wt', encoding='utf-8')
         t_itr = tqdm.trange(self.config.num_epoch, leave=False, ncols=180, file=self.out)
         for epoch in t_itr:
@@ -135,7 +132,6 @@ class Trainer:
         self.out.close()
 
     def train_process(self, sentence, inp_padding_mask, tgt_padding_mask, scaler, step):
-
         inputs = sentence[:,:]
         tgt = sentence[:,:]
         label = sentence[:,1:]
@@ -152,58 +148,27 @@ class Trainer:
         label = label.to(self.config.decoder_device)
         tgt_padding_mask = tgt_padding_mask.to(self.config.decoder_device)
 
-        if scaler.is_enabled():
-            with torch.cuda.amp.autocast():
-                # m, memory = self.encoder(inputs, attention_mask=inp_padding_mask)
-                memory = self.encoder(inputs, attention_mask=inp_padding_mask)
-                memory = memory.to(self.config.decoder_device)
-                out = self.decoder(tgt, memory, tgt_padding_mask=tgt_padding_mask)
-                # make_dot(out).render(str(self.output_dir + "graph"))
+        # m, memory = encoder(inputs, attention_mask=inp_padding_mask)
+        memory = self.encoder(inputs, attention_mask=inp_padding_mask)
+        memory = memory.to(self.config.decoder_device)
+        out = self.decoder(tgt, memory, tgt_padding_mask=tgt_padding_mask)
+        # make_dot(out).render(str(self.output_dir + "graph"))
 
-                out = out[:-1].contiguous().view(-1, out.shape[-1])
-                label = label.transpose(0,1).contiguous().view(-1)
+        out = out[:-1].contiguous().view(-1, out.shape[-1])
+        label = label.transpose(0,1).contiguous().view(-1)
 
-                # loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, m, epoch * len(train_itr) + n)
-                loss, cross_entropy, mmd = self.loss_func(out, label, memory)
-                loss = loss / self.config.accumulate_size
+        # loss, cross_entropy, kl_loss, kl_weight = self.loss_func(out, label, m, step)
+        loss, cross_entropy, mmd = self.loss_func(out, label, memory)
+        loss = loss / self.config.accumulate_size
 
-            scaler.scale(loss).backward()
+        loss.backward()
 
-            # scaler.unscale_(self.encoder_opt)
-            # scaler.unscale_(self.decoder_opt)
-            # torch.nn.utils.clip_grad_norm_(self.encoder.parameters(), 1)
-            # torch.nn.utils.clip_grad_norm_(self.decoder.parameters(), 1)
+        if (step + 1) % self.config.accumulate_size == 0:
+            self.encoder_opt.step()
+            self.decoder_opt.step()
 
-            if (step + 1) % self.config.accumulate_size == 0:
-                scaler.step(self.encoder_opt)
-                scaler.step(self.decoder_opt)
-                scaler.update()
-
-                self.encoder_opt.zero_grad()
-                self.decoder_opt.zero_grad()
-
-        else:
-            # m, memory = encoder(inputs, attention_mask=inp_padding_mask)
-            memory = self.encoder(inputs, attention_mask=inp_padding_mask)
-            memory = memory.to(self.config.decoder_device)
-            out = self.decoder(tgt, memory, tgt_padding_mask=tgt_padding_mask)
-            # make_dot(out).render(str(self.output_dir + "graph"))
-
-            out = out[:-1].contiguous().view(-1, out.shape[-1])
-            label = label.transpose(0,1).contiguous().view(-1)
-
-            # loss, cross_entropy, kl_loss, kl_weight = self.loss_func(out, label, m, step)
-            loss, cross_entropy, mmd = self.loss_func(out, label, memory)
-            loss = loss / self.config.accumulate_size
-
-            loss.backward()
-
-            if (step + 1) % self.config.accumulate_size == 0:
-                self.encoder_opt.step()
-                self.decoder_opt.step()
-
-                self.encoder_opt.zero_grad()
-                self.decoder_opt.zero_grad()
+            self.encoder_opt.zero_grad()
+            self.decoder_opt.zero_grad()
 
         loss_item = loss.item()
         cross_entropy_item = cross_entropy.item()

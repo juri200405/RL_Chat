@@ -28,11 +28,14 @@ class VaeLoss:
         KL_weight = self.anneal_function(step)
         return (closs_entropy_loss + KL_weight * KL_loss) / self.batch_size, closs_entropy_loss, KL_loss, KL_weight
 
-class MmdLoss:
-    def __init__(self, loss_func, config):
-        self.label_loss_func = loss_func
+class MmdLoss(torch.nn.Module):
+    def __init__(self, ce_weight, config, ignore_pad, reducation='mean'):
+        super().__init__()
+        if ignore_pad:
+            self.label_loss_func = torch.nn.CrossEntropyLoss(weight=ce_weight, ignore_index=3, reduction=reducation)
+        else:
+            self.label_loss_func = torch.nn.CrossEntropyLoss(weight=ce_weight, reduction=reducation)
         self.n_latent = config.n_latent
-        self.decoder_device = config.decoder_device
         self.batch_size = config.batch_size
         self.mmd_coefficient = config.mmd_coefficient
 
@@ -48,7 +51,7 @@ class MmdLoss:
         return torch.exp(-kernel_input) # (x_size, y_size)
 
     def forward(self, out, label, x):
-        y = torch.randn(256, self.n_latent, device=self.decoder_device)
+        y = torch.randn(256, self.n_latent, device=x.device)
         xx_kernel = self.kernel(x, x)
         yy_kernel = self.kernel(y, y)
         xy_kernel = self.kernel(x, y)

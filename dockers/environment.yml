@@ -1,6 +1,7 @@
 name: pl
 channels:
   - pytorch
+  - conda-forge
   - defaults
 dependencies:
   - pip
@@ -17,6 +18,7 @@ dependencies:
   - regex
   - pyparsing
   - packaging
+  - pytorch-lightning
   - pip:
     - sentencepiece
     - python-telegram-bot

@@ -26,14 +26,26 @@ def get_collate_fn(pad_index=0, bos_index=1, eos_index=2, fix_max_len=None, fix_
     return _f
 
 
-def get_dataloader(dataset, batchsize, pad_index=0, bos_index=1, eos_index=2, fix_max_len=None, fix_len=None, shuffle=True):
+def get_dataloader(
+        dataset,
+        batchsize,
+        pad_index=0,
+        bos_index=1,
+        eos_index=2,
+        fix_max_len=None,
+        fix_len=None,
+        shuffle=True,
+        num_workers=1
+        ):
     if shuffle:
+        sampler = RandomSampler(dataset)
         dataloader = data.DataLoader(
                 dataset,
                 batch_size = batchsize,
-                sampler=RandomSampler(dataset),
+                sampler=sampler,
                 collate_fn=get_collate_fn(pad_index, bos_index, eos_index, fix_max_len, fix_len),
-                num_workers=2, pin_memory=True
+                num_workers=num_workers,
+                pin_memory=True
                 )
     else:
         dataloader = data.DataLoader(
@@ -41,6 +53,7 @@ def get_dataloader(dataset, batchsize, pad_index=0, bos_index=1, eos_index=2, fi
                 batch_size = batchsize,
                 shuffle=False,
                 collate_fn=get_collate_fn(pad_index, bos_index, eos_index, fix_max_len, fix_len),
-                num_workers=2, pin_memory=True
+                num_workers=num_workers,
+                pin_memory=True
                 )
     return dataloader
