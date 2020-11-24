@@ -201,9 +201,9 @@ class MMD_VAE(pl.LightningModule):
         return tgt
 
     def forward(self, sentence, inp_mask, tgt_mask):
-        inputs = sentence[:,:].detach()
-        tgt = sentence[:,:].detach()
-        label = sentence[:,1:].detach()
+        inputs = sentence[:,:]
+        tgt = sentence[:,:]
+        label = sentence[:,1:]
         inp_mask = tgt_mask
         tgt_mask = tgt_mask
 

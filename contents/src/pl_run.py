@@ -78,7 +78,6 @@ if __name__ == "__main__":
             args,
             default_root_dir=args.log_dir,
             weights_save_path=args.output_dir,
-            accelerator='ddp',
             benchmark=True,
             log_every_n_steps=10,
             flush_logs_every_n_steps=50,
