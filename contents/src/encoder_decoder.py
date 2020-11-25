@@ -186,11 +186,11 @@ class MMD_VAE(pl.LightningModule):
         tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.device) # <s>
 
         # </s>を出力してたら0, してなかったら1
-        unfinish = torch.ones(memory.shape[0], dtype=torch.long, device=self.device)
+        unfinish = torch.ones(memory.shape[0],1, dtype=torch.long, device=self.device)
         while tgt.shape[1] <= self.config.max_len:
             out = self.decoder(tgt, memory)
             _, topi = out.topk(1)
-            next_word = topi[-1]
+            next_word = topi[:,-1]
             # </s>を出力してたら<pad>にする
             next_word = next_word*unfinish + (3)*(1-unfinish)
             tgt = torch.cat((tgt, next_word), dim=-1)
@@ -237,7 +237,7 @@ class MMD_VAE(pl.LightningModule):
                     str(Path(self.logger.log_dir) / "val_text_{}.csv".format(self.val_count)),
                     "at", encoding='utf-8'
                     ) as f:
-                f.write("\n".join(['"{}","{}"'.format(i,r) for i, r in zip(self.sp.decode(label.cpu().tolist()), self.sp.decode(rec.cpu().tolist()))]))
+                f.write("\n".join(['"{}","{}"'.format(i,r) for i, r in zip(sentence.sp.decode(label.cpu().tolist()), self.sp.decode(rec.cpu().tolist()))]))
         return (loss.detach(), ce.detach(), mmd.detach())
 
     def validation_epoch_end(self, validation_step_outputs):
