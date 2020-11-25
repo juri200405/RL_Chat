@@ -5,9 +5,9 @@
 	-i data/tomioka/no_kwdlc_126.pkl \
 	-p data/tomioka/transformer_config/vae_transformer.json \
 	-b data/tomioka/laboroai_bert/large/converted/ \
-	-o data/tomioka/output/transformer_vae/2020_11_25_2/ \
-	-l data/output/transformer_vae/2020_11_25_2/ \
-	--eos_weight 10.0 \
-	--gpus 1 \
-#	--accelerator "ddp" \
+	-o data/tomioka/output/transformer_vae/2020_11_25_3/ \
+	-l data/output/transformer_vae/2020_11_25_3/ \
+	--eos_weight 1.0 \
+	--gpus 2 \
+	--accelerator "ddp" \
 	--val_check_interval 0.1

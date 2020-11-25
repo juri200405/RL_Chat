@@ -209,9 +209,8 @@ class MMD_VAE(pl.LightningModule):
 
         memory = self.encoder(inputs, attention_mask=inp_mask)
         outs = self.decoder(tgt, memory, tgt_padding_mask=tgt_mask)
-        # outs = outs[:-1].contiguous().view(-1, outs.shape[-1])
-        outs = outs[:-1,:].transpose(0,1).transpose(1,2)
-        # label = label.transpose(0,1).contiguous().view(-1)
+        outs = outs[:-1].contiguous().view(-1, outs.shape[-1])
+        label = label.transpose(0,1).contiguous().view(-1)
 
         return outs, label, memory
 
