@@ -108,13 +108,10 @@ class Trainer:
             f.write("\n{}".format(text))
 
     def run(self):
-        scaler = torch.cuda.amp.GradScaler(enabled=False)
-        # scaler = torch.cuda.amp.GradScaler(enabled=True)
-
         self.out = open(str(self.log_dir / "log"), 'wt', encoding='utf-8')
         t_itr = tqdm.trange(self.config.num_epoch, leave=False, ncols=180, file=self.out)
         for epoch in t_itr:
-            train_loss = self.train(scaler, epoch)
+            train_loss = self.train(epoch)
             t_itr.set_postfix({"ave_loss":train_loss})
             self.writer.add_scalar('Loss/average', train_loss, epoch)
 
@@ -134,7 +131,7 @@ class Trainer:
         self.writer.close()
         self.out.close()
 
-    def train_process(self, sentence, inp_padding_mask, tgt_padding_mask, scaler, step):
+    def train_process(self, sentence, inp_padding_mask, tgt_padding_mask, step):
 
         inputs = sentence[:,:]
         tgt = sentence[:,:]
@@ -152,58 +149,27 @@ class Trainer:
         label = label.to(self.config.decoder_device)
         tgt_padding_mask = tgt_padding_mask.to(self.config.decoder_device)
 
-        if scaler.is_enabled():
-            with torch.cuda.amp.autocast():
-                # m, memory = self.encoder(inputs, attention_mask=inp_padding_mask)
-                memory = self.encoder(inputs, attention_mask=inp_padding_mask)
-                memory = memory.to(self.config.decoder_device)
-                out = self.decoder(tgt, memory, tgt_padding_mask=tgt_padding_mask)
-                # make_dot(out).render(str(self.output_dir + "graph"))
+        # m, memory = encoder(inputs, attention_mask=inp_padding_mask)
+        memory = self.encoder(inputs, attention_mask=inp_padding_mask)
+        memory = memory.to(self.config.decoder_device)
+        out = self.decoder(tgt, memory, tgt_padding_mask=tgt_padding_mask)
+        # make_dot(out).render(str(self.output_dir + "graph"))
 
-                out = out[:-1].contiguous().view(-1, out.shape[-1])
-                label = label.transpose(0,1).contiguous().view(-1)
+        out = out[:-1].contiguous().view(-1, out.shape[-1])
+        label = label.transpose(0,1).contiguous().view(-1)
 
-                # loss, cross_entropy, kl_loss, kl_weight = loss_func(out, label, m, epoch * len(train_itr) + n)
-                loss, cross_entropy, mmd = self.loss_func(out, label, memory)
-                loss = loss / self.config.accumulate_size
+        # loss, cross_entropy, kl_loss, kl_weight = self.loss_func(out, label, m, step)
+        loss, cross_entropy, mmd = self.loss_func(out, label, memory)
+        loss = loss / self.config.accumulate_size
 
-            scaler.scale(loss).backward()
+        loss.backward()
 
-            # scaler.unscale_(self.encoder_opt)
-            # scaler.unscale_(self.decoder_opt)
-            # torch.nn.utils.clip_grad_norm_(self.encoder.parameters(), 1)
-            # torch.nn.utils.clip_grad_norm_(self.decoder.parameters(), 1)
+        if (step + 1) % self.config.accumulate_size == 0:
+            self.encoder_opt.step()
+            self.decoder_opt.step()
 
-            if (step + 1) % self.config.accumulate_size == 0:
-                scaler.step(self.encoder_opt)
-                scaler.step(self.decoder_opt)
-                scaler.update()
-
-                self.encoder_opt.zero_grad()
-                self.decoder_opt.zero_grad()
-
-        else:
-            # m, memory = encoder(inputs, attention_mask=inp_padding_mask)
-            memory = self.encoder(inputs, attention_mask=inp_padding_mask)
-            memory = memory.to(self.config.decoder_device)
-            out = self.decoder(tgt, memory, tgt_padding_mask=tgt_padding_mask)
-            # make_dot(out).render(str(self.output_dir + "graph"))
-
-            out = out[:-1].contiguous().view(-1, out.shape[-1])
-            label = label.transpose(0,1).contiguous().view(-1)
-
-            # loss, cross_entropy, kl_loss, kl_weight = self.loss_func(out, label, m, step)
-            loss, cross_entropy, mmd = self.loss_func(out, label, memory)
-            loss = loss / self.config.accumulate_size
-
-            loss.backward()
-
-            if (step + 1) % self.config.accumulate_size == 0:
-                self.encoder_opt.step()
-                self.decoder_opt.step()
-
-                self.encoder_opt.zero_grad()
-                self.decoder_opt.zero_grad()
+            self.encoder_opt.zero_grad()
+            self.decoder_opt.zero_grad()
 
         loss_item = loss.item()
         cross_entropy_item = cross_entropy.item()
@@ -214,7 +180,7 @@ class Trainer:
 
         return loss_item, cross_entropy_item, mmd_item
 
-    def train(self, scaler, epoch):
+    def train(self, epoch):
         self.encoder.train()
         self.decoder.train()
         losses = []
@@ -222,7 +188,7 @@ class Trainer:
         n = epoch * len(train_itr)
         for sentence, inp_padding_mask, tgt_padding_mask in train_itr:
         # for sentence, _ in train_itr:
-            loss_item, cross_entropy_item, mmd_item = self.train_process(sentence, inp_padding_mask, tgt_padding_mask, scaler, n)
+            loss_item, cross_entropy_item, mmd_item = self.train_process(sentence, inp_padding_mask, tgt_padding_mask, n)
             losses.append(loss_item)
             # train_itr.set_postfix({"loss":loss.item(), "ce_loss":cross_entropy.item() , "weight":kl_weight, "kl_loss":kl_loss.item()})
             train_itr.set_postfix({"loss":loss_item, "ce_loss":cross_entropy_item , "mmd":mmd_item})
@@ -259,30 +225,36 @@ class Trainer:
         self.decoder.eval()
         data = random.choice(self.train_dataset)
 
-        input_s = torch.tensor([1] + data + [2], device=self.config.encoder_device).unsqueeze(0)
-        pad = torch.full((1, self.config.max_len - input_s.shape[1]), 3, dtype=torch.long, device=self.config.encoder_device)
-        input_s = torch.cat((input_s, pad), dim=1)
-        # _, memory = self.encoder(input_s)
-        memory = self.encoder(input_s)
-        memory = memory.to(self.config.decoder_device)
+        with torch.no_grad():
+            input_s = torch.tensor([1] + data + [2], device=self.config.encoder_device).unsqueeze(0)
+            inp_mask = torch.tensor([[False]*input_s.shape[1] + [True]*(self.config.max_len - input_s.shape[1])], device=self.config.encoder_device)
+            pad = torch.full((1, self.config.max_len - input_s.shape[1]), 3, dtype=torch.long, device=self.config.encoder_device)
+            input_s = torch.cat((input_s, pad), dim=1)
+            # _, memory = self.encoder(input_s)
+            # memory = self.encoder(input_s)
+            memory = self.encoder(input_s, attention_mask=inp_mask)
+            memory = memory.to(self.config.decoder_device)
 
         ids = self.generate_sentence(memory)
 
         return data, ids[0]
 
     def generate_sentence(self, memory):
-        tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.config.encoder_device)  # <s>
-        # tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.config.decoder_device)
-        unfinish = torch.ones(memory.shape[0], 1, dtype=torch.long, device=self.config.decoder_device)
-        while tgt.shape[1] <= self.config.max_len:
-            out = self.decoder(tgt, memory)
-            _, topi = out.transpose(0,1).topk(1)
-            next_word = topi[:,-1]
-            next_word = next_word*unfinish + (3)*(1-unfinish)
-            tgt = torch.cat((tgt, next_word), dim=-1)
-            unfinish = unfinish * (~(next_word == 2)).long()
-            if unfinish.max() == 0: # </s>
-                break
+        self.encoder.eval()
+        self.decoder.eval()
+        with torch.no_grad():
+            tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.config.encoder_device)  # <s>
+            # tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.config.decoder_device)
+            unfinish = torch.ones(memory.shape[0], 1, dtype=torch.long, device=self.config.decoder_device)
+            while tgt.shape[1] <= self.config.max_len:
+                out = self.decoder(tgt, memory)
+                _, topi = out.transpose(0,1).topk(1)
+                next_word = topi[:,-1]
+                next_word = next_word*unfinish + (3)*(1-unfinish)
+                tgt = torch.cat((tgt, next_word), dim=-1)
+                unfinish = unfinish * (~(next_word == 2)).long()
+                if unfinish.max() == 0: # </s>
+                    break
         return tgt.cpu().tolist()
 
 if __name__ == "__main__":
