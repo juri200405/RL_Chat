@@ -5,5 +5,5 @@
 	-i data/tomioka/no_kwdlc_126.pkl \
 	-p data/tomioka/transformer_config/vae_transformer.json \
 	-b data/tomioka/laboroai_bert/large/converted/ \
-	-o data/tomioka/output/transformer_vae/2020_11_22_02/ \
-	-l data/output/transformer_vae/2020_11_22_02/
+	-o data/tomioka/output/transformer_vae/2020_11_26/ \
+	-l data/output/transformer_vae/2020_11_26/

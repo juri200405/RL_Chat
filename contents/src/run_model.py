@@ -246,7 +246,7 @@ class Trainer:
                 output_text = '"{}","{}"'.format(self.sp.decode(input_ids), self.sp.decode(ids))
                 self.text_logger(train_itr, "step_output_text", output_text, n)
                 rand_ids = self.generate_sentence(torch.randn(1, self.config.n_latent, device=self.config.decoder_device))
-                self.text_logger(train_itr, "random_output_text", self.sp.decode(rand_ids), n)
+                self.text_logger(train_itr, "random_output_text", self.sp.decode(rand_ids[0]), n)
 
                 self.encoder.train()
                 self.decoder.train()
