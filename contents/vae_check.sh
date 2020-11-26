@@ -1,9 +1,7 @@
 #! /bin/bash
 
 python src/vae_check.py \
-	-m data/tomioka/laboroai_bert/large/webcorpus.model \
-	-i data/tomioka/dbdc/all_utterances_noungram.txt \
-	-p data/tomioka/output/bert_vae/2020_08_24/hyper_param.json \
-	-b data/tomioka/laboroai_bert/large/converted/ \
-	-o data/tomioka/output/bert_vae/2020_09_18/ \
-	--pt_file data/tomioka/output/bert_vae/2020_08_24/cuda_epoch010.pt
+	-m data/tomioka/spm_model/no_kwdlc.model \
+	-i data/tomioka/no_kwdlc_126.pkl \
+	-p data/tomioka/output/transformer_vae/2020_11_26/hyper_param.json \
+	--pt_file data/tomioka/output/transformer_vae/2020_11_26/0030k.pt

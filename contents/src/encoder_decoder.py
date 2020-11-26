@@ -131,7 +131,7 @@ class transformer_Decoder(nn.Module):
 
         memory = self.hidden2memory(self.relu(self.latent2hidden(latent)))
         # memory = self.latent2memory(latent)
-        memory = torch.reshape(memory, (tgt.shape[1], tgt.shape[0], tgt.shape[2])).transpose(0,1)
+        memory = torch.reshape(memory, (memory.shape[0], -1, tgt.shape[2])).transpose(0,1)
 
         output = self.transformer_decoder(tgt, memory, tgt_mask=tgt_mask, memory_mask=memory_mask, tgt_key_padding_mask=tgt_padding_mask, memory_key_padding_mask=memory_padding_mask)
         output = self.fc(output)
