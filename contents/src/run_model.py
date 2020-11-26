@@ -268,26 +268,22 @@ class Trainer:
 
         ids = self.generate_sentence(memory)
 
-        return data, ids
+        return data, ids[0]
 
     def generate_sentence(self, memory):
-        tgt = torch.full((1, self.config.max_len), 0, dtype=torch.long, device=self.config.encoder_device)
-        # tgt = torch.full((1, self.config.max_len), 0, dtype=torch.long, device=self.config.decoder_device)
-        tgt_key_padding_mask = torch.full((1, self.config.max_len), True, dtype=torch.bool, device=self.config.decoder_device)
-        t_word = 1 # <s>
-        ids = []
-        for t in range(self.config.max_len):
-            tgt[0][t] = t_word
-            tgt_key_padding_mask[0][t] = False
-            out = self.decoder(tgt, memory, tgt_padding_mask=tgt_key_padding_mask)
-            _, topi = out.topk(1)
-            next_word = topi[t].item()
-            ids.append(next_word)
-            if next_word == 2: # </s>
+        tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.config.encoder_device)  # <s>
+        # tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.config.decoder_device)
+        unfinish = torch.ones(memory.shape[0], 1, dtype=torch.long, device=self.config.decoder_device)
+        while tgt.shape[1] <= self.config.max_len:
+            out = self.decoder(tgt, memory)
+            _, topi = out.transpose(0,1).topk(1)
+            next_word = topi[:,-1]
+            next_word = next_word*unfinish + (3)*(1-unfinish)
+            tgt = torch.cat((tgt, next_word), dim=-1)
+            unfinish = unfinish * (~(next_word == 2)).long()
+            if unfinish.max() == 0: # </s>
                 break
-            else:
-                t_word = next_word
-        return ids
+        return tgt.cpu().tolist()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
