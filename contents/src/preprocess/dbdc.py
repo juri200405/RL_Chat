@@ -56,7 +56,7 @@ def make_dialog_database(input_dir, output_file):
     with open(output_file, 'wt', encoding='utf-8') as f:
         json.dump(utterances, f)
 
-def make_dbdc_data(input_dir, output_file):
+def make_dbdc_data(input_dir):
     score_dict = {"O":1.0, "T":0.5, "X":0.0}
     datas = []
     for filename in Path(input_dir).glob("**/*.json"):
@@ -71,9 +71,8 @@ def make_dbdc_data(input_dir, output_file):
                 if item["speaker"] == "S":
                     score = np.mean([score_dict[anno_item["breakdown"]] for anno_item in item["annotations"]])
                     datas.append({"utterances":utterances.copy(), "score":score})
+    return datas
 
-    with open(output_file, 'wt', encoding='utf-8') as f:
-        json.dump(datas, f)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -87,6 +86,8 @@ if __name__ == "__main__":
     elif args.file_type == "database":
         make_dialog_database(args.inputdir, args.outputfile)
     elif args.file_type == "dbdc_data":
-        male_dbdc_data(args.inputdir, args.outputfile)
+        datas = male_dbdc_data(args.inputdir)
+        with open(args.outputfile, 'wt', encoding='utf-8') as f:
+            json.dump(datas, f)
     else:
         print('file_type should be ["utt_list","database","dbdc_data"]')

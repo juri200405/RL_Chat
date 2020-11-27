@@ -1,9 +1,8 @@
 import arguparse
 
 import torch
-import pytorch_lightning as pl
 
-from encoder_decoder import MMD_VAE
+from encoder_decoder import transformer_Encoder, Transformer_Embedding
 from config import Config
 
 class DBDC(torch.nn.Module):
@@ -24,18 +23,21 @@ class DBDC(torch.nn.Module):
         out = self.fc2(self.relu(out))
         return self.sigmoid(out)
 
+def DBDC_prepare(encoder, datas):
+    processed = []
+
 if __name__ == "__main__":
     parser.argparse.ArgumentParser()
     parser.add_argument("--hyper_param", required=True)
-    parser.add_argument("--mmdvae_checkpoint", required=True)
-    parser = MMD_VAE.add_argparse_args(parser)
+    parser.add_argument("--vae_checkpoint", required=True)
     args = parser.parse_args()
 
     config = Config()
     config.load_json(args.hyper_param)
-    model = MMD_VAE.load_from_checkpoint(args.mmdvae_checkpoint, config, args)
 
-    encoder = model.encoder
-    decoder = model.decoder
+    encoder = transformer_Encoder(config, Transformer_Embedding(config), nn.LayerNorm(config.d_model))
+
+    checkpoint = torch.load(args.vae_checkpoint, map_location="cpu")
+    self.encoder.load_state_dict(checkpoint["encoder_state_dict"])
 
     loss_func = torch.nn.MSELoss()
