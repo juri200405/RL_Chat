@@ -26,8 +26,8 @@ class VAE_tester:
         self.encoder = transformer_Encoder(config, embedding, nn.LayerNorm(config.d_model))
         self.decoder = transformer_Decoder(config, embedding, nn.LayerNorm(config.d_model))
 
-    def load_pt(self, pt_file)
-        checkpoint = torch.load(args.pt_file, map_location="cpu")
+    def load_pt(self, pt_file):
+        checkpoint = torch.load(pt_file, map_location="cpu")
         self.encoder.load_state_dict(checkpoint["encoder_state_dict"])
         self.decoder.load_state_dict(checkpoint["decoder_state_dict"])
         self.encoder.eval()
