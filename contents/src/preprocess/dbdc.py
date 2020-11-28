@@ -86,7 +86,7 @@ if __name__ == "__main__":
     elif args.file_type == "database":
         make_dialog_database(args.inputdir, args.outputfile)
     elif args.file_type == "dbdc_data":
-        datas = male_dbdc_data(args.inputdir)
+        datas = make_dbdc_data(args.inputdir)
         with open(args.outputfile, 'wt', encoding='utf-8') as f:
             json.dump(datas, f)
     else:
