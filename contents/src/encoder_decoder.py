@@ -90,7 +90,6 @@ class transformer_Decoder(nn.Module):
     def forward(self, tgt, latent, tgt_mask=None, memory_mask=None, tgt_padding_mask=None, memory_padding_mask=None):
         tgt = self.embedding(tgt.transpose(0,1))
 
-        tgt = tgt.to(latent.device)
         if tgt_mask is None:
             tgt_mask = self.generate_square_subsequent_mask(len(tgt)).to(latent.device)
 

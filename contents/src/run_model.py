@@ -1,16 +1,12 @@
 import argparse
 from pathlib import Path
 import random
-import json
-from itertools import chain
 import pickle
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-
-import torch_optimizer
 
 import numpy as np
 import tqdm
@@ -37,7 +33,7 @@ class Trainer:
         self.config.n_vocab = len(self.sp)
 
         print(args.output_dir)
-        print("encoder = {}, decoder = {}".format(self.config.encoder_device, self.config.decoder_device))
+        print("device = {}".format(self.config.device))
 
         if self.config.model_type == "transformer":
             embedding_model = Transformer_Embedding(self.config)
@@ -59,9 +55,8 @@ class Trainer:
         self.decoder = transformer_Decoder(self.config, embedding_model, nn.LayerNorm(self.config.d_model))
         # self.decoder = transformer_Decoder(self.config, Transformer_Embedding(self.config), nn.LayerNorm(self.config.d_model))
 
-        # encoderのBERT内に組み込まれてる BertEmbeddings をdecoderで使うため、GPUへ送る順番は decoder->encoder
-        self.decoder.to(self.config.decoder_device)
-        self.encoder.to(self.config.encoder_device)
+        self.encoder.to(self.config.device)
+        self.decoder.to(self.config.device)
 
 
         if self.config.optim_type == "Adam":
@@ -120,21 +115,18 @@ class Trainer:
         tgt = sentence[:,:]
         label = sentence[:,1:]
 
-        inputs = inputs.to(self.config.encoder_device)
+        inputs = inputs.to(self.config.device)
 
         if self.config.model_type == "bert":
-            inp_padding_mask = inp_padding_mask.to(self.config.encoder_device)
+            inp_padding_mask = inp_padding_mask.to(self.config.device)
         else:
-            inp_padding_mask = tgt_padding_mask.to(self.config.encoder_device)
-        # embedding がencoderのdeviceにあるため、tgtはencoder_deviceに送る
-        tgt = tgt.to(self.config.encoder_device)
-        # tgt = tgt.to(self.config.decoder_device)
-        label = label.to(self.config.decoder_device)
-        tgt_padding_mask = tgt_padding_mask.to(self.config.decoder_device)
+            inp_padding_mask = tgt_padding_mask.to(self.config.device)
+        tgt = tgt.to(self.config.device)
+        label = label.to(self.config.device)
+        tgt_padding_mask = tgt_padding_mask.to(self.config.device)
 
         # m, memory = encoder(inputs, attention_mask=inp_padding_mask)
         memory = self.encoder(inputs, attention_mask=inp_padding_mask)
-        memory = memory.to(self.config.decoder_device)
         out = self.decoder(tgt, memory, tgt_padding_mask=tgt_padding_mask)
         # make_dot(out).render(str(self.output_dir + "graph"))
 
@@ -193,7 +185,7 @@ class Trainer:
                 input_ids, ids = self.test()
                 output_text = '"{}","{}"'.format(self.sp.decode(input_ids), self.sp.decode(ids))
                 self.text_logger(train_itr, "step_output_text", output_text, n)
-                rand_ids = self.generate_sentence(torch.randn(1, self.config.n_latent, device=self.config.decoder_device))
+                rand_ids = self.generate_sentence(torch.randn(1, self.config.n_latent, device=self.config.device))
                 self.text_logger(train_itr, "random_output_text", self.sp.decode(rand_ids[0]), n)
 
                 self.encoder.train()
@@ -208,13 +200,12 @@ class Trainer:
         data = random.choice(self.train_dataset)
 
         with torch.no_grad():
-            input_s = torch.tensor([1] + data + [2], device=self.config.encoder_device).unsqueeze(0)
-            inp_mask = torch.tensor([[False]*input_s.shape[1] + [True]*(self.config.max_len - input_s.shape[1])], device=self.config.encoder_device)
-            pad = torch.full((1, self.config.max_len - input_s.shape[1]), 3, dtype=torch.long, device=self.config.encoder_device)
+            input_s = torch.tensor([1] + data + [2], device=self.config.device).unsqueeze(0)
+            inp_mask = torch.tensor([[False]*input_s.shape[1] + [True]*(self.config.max_len - input_s.shape[1])], device=self.config.device)
+            pad = torch.full((1, self.config.max_len - input_s.shape[1]), 3, dtype=torch.long, device=self.config.device)
             input_s = torch.cat((input_s, pad), dim=1)
             # _, memory = self.encoder(input_s, attention_mask=inp_mask)
             memory = self.encoder(input_s, attention_mask=inp_mask)
-            memory = memory.to(self.config.decoder_device)
 
         ids = self.generate_sentence(memory)
 
@@ -224,9 +215,8 @@ class Trainer:
         self.encoder.eval()
         self.decoder.eval()
         with torch.no_grad():
-            tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.config.encoder_device)  # <s>
-            # tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.config.decoder_device)
-            unfinish = torch.ones(memory.shape[0], 1, dtype=torch.long, device=self.config.decoder_device)
+            tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.config.device)  # <s>
+            unfinish = torch.ones(memory.shape[0], 1, dtype=torch.long, device=self.config.device)
             while tgt.shape[1] <= self.config.max_len:
                 out = self.decoder(tgt, memory)
                 _, topi = out.transpose(0,1).topk(1)

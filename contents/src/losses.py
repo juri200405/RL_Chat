@@ -7,7 +7,7 @@ class VaeLoss:
     def __init__(self, loss_func, config, len_itr):
         self.x0 = config.x0_epoch * len_itr
         self.k = config.anneal_k
-        self.encoder_device = config.encoder_device
+        self.device = config.device
         self.batch_size = config.batch_size
 
         self.label_loss_func = loss_func
@@ -22,7 +22,7 @@ class VaeLoss:
     def forward(self, out, label, m, step):
         if self.target is None:
             m_shape = m.mean.shape[-1]
-            self.target = torch.distributions.multivariate_normal.MultivariateNormal(torch.zeros(m_shape, device=self.encoder_device), torch.eye(m_shape, device=self.encoder_device))
+            self.target = torch.distributions.multivariate_normal.MultivariateNormal(torch.zeros(m_shape, device=self.device), torch.eye(m_shape, device=self.device))
         closs_entropy_loss = self.label_loss_func(out, label)
         KL_loss = torch.distributions.kl.kl_divergence(m, self.target).sum()
         KL_weight = self.anneal_function(step)
@@ -32,7 +32,7 @@ class MmdLoss:
     def __init__(self, loss_func, config):
         self.label_loss_func = loss_func
         self.n_latent = config.n_latent
-        self.decoder_device = config.decoder_device
+        self.device = config.device
         self.batch_size = config.batch_size
         self.mmd_coefficient = config.mmd_coefficient
 
@@ -48,7 +48,7 @@ class MmdLoss:
         return torch.exp(-kernel_input) # (x_size, y_size)
 
     def forward(self, out, label, x):
-        y = torch.randn(256, self.n_latent, device=self.decoder_device)
+        y = torch.randn(256, self.n_latent, device=self.device)
         xx_kernel = self.kernel(x, x)
         yy_kernel = self.kernel(y, y)
         xy_kernel = self.kernel(x, y)
