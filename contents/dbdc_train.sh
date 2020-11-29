@@ -5,4 +5,5 @@
 	--spm_model data/tomioka/spm_model/no_kwdlc.model \
 	--data_file data/tomioka/dbdc_data.json \
 	--output_dir data/tomioka/output/dbdc/2020_11_28/ \
-	--gpu 2
+	--gpu 2 \
+	--lr 1e-4

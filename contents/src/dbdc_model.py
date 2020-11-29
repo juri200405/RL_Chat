@@ -66,8 +66,10 @@ def get_collate_fn():
         conv_len = [item.shape[0] for item in padded_tensors]
         max_conv_len = max(conv_len)
 
-        padded_tensors = torch.cat([torch.cat((item, torch.full((max_conv_len -item.shape[0], item.shape[1]), 3, dtype=torch.long)), dim=0) for item in padded_tensors], dim=0)
-        padding_masks = torch.cat([torch.cat((item, torch.full((max_conv_len -item.shape[0], item.shape[1]), True, dtype=torch.bool)), dim=0) for item in padding_masks], dim=0)
+        # padded_tensors = torch.cat([torch.cat((item, torch.full((max_conv_len -item.shape[0], item.shape[1]), 3, dtype=torch.long)), dim=0) for item in padded_tensors], dim=0)
+        padded_tensors = torch.cat([torch.cat((item, torch.tensor([[1]+[2]+[3]*(item.shape[1]-2)]*(max_conv_len-item.shape[0]), dtype=torch.long)), dim=0) for item in padded_tensors], dim=0)
+        # padding_masks = torch.cat([torch.cat((item, torch.full((max_conv_len -item.shape[0], item.shape[1]), True, dtype=torch.bool)), dim=0) for item in padding_masks], dim=0)
+        padding_masks = torch.cat([torch.cat((item, torch.tensor([[False]*2+[True]*(item.shape[1]-2)]*(max_conv_len-item.shape[0]), dtype=torch.bool)), dim=0) for item in padding_masks], dim=0)
 
         return {"input": padded_tensors, "mask": padding_masks, "conv_len": torch.tensor(conv_len), "score":scores}
 
@@ -108,7 +110,6 @@ if __name__ == "__main__":
         datas = json.load(f)
     dataset = [process_data(item, sp, config.max_len) for item in datas]
     val_size = int(len(dataset)*0.1)
-    print(len(dataset), val_size)
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [len(dataset)-val_size, val_size])
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -132,14 +133,6 @@ if __name__ == "__main__":
     loss_func = torch.nn.MSELoss()
 
     for i in tqdm.tqdm(range(args.num_epoch)):
-        val_loss = []
-        for item in tqdm.tqdm(val_dataloader):
-            model.eval()
-            out = model(item["input"].to(device), item["mask"].to(device), item["conv_len"].to(device))
-            loss = loss_func(out, item["score"].to(device))
-            val_loss.append(loss.item())
-        writer.add_scalar("val/loss", np.mean(val_loss), i)
-
         for n, item in enumerate(tqdm.tqdm(train_dataloader)):
             model.train()
             out = model(item["input"].to(device), item["mask"].to(device), item["conv_len"].to(device))
@@ -149,17 +142,19 @@ if __name__ == "__main__":
             opt.step()
             writer.add_scalar("train/loss", loss.item(), i*len(train_dataloader) + n)
 
+        val_loss = []
+        for item in tqdm.tqdm(val_dataloader):
+            model.eval()
+            out = model(item["input"].to(device), item["mask"].to(device), item["conv_len"].to(device))
+            loss = loss_func(out, item["score"].to(device))
+            val_loss.append(loss.item())
+        writer.add_scalar("val/loss", np.mean(val_loss), i)
+
         torch.save({
             "epoch": i,
             "model_state_dict": model.state_dict(),
             "opt_state_dict": opt.state_dict()
             }, str(Path(args.output_dir)/"epoch{:03d}.pt".format(i)))
 
-    val_loss = []
-    for item in tqdm.tqdm(val_dataloader):
-        model.eval()
-        out = model(item["input"], item["mask"], item["conv_len"])
-        loss = loss_func(out, item["score"])
-        val_loss.append(loss.item())
     writer.add_scalar("val/loss", np.mean(val_loss), i)
     writer.close()
