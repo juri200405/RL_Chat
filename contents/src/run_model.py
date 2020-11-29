@@ -109,25 +109,19 @@ class Trainer:
         self.writer.close()
         self.out.close()
 
-    def train_process(self, sentence, inp_padding_mask, tgt_padding_mask, step):
-
+    def train_process(self, sentence, padding_mask, step):
         inputs = sentence[:,:]
         tgt = sentence[:,:]
         label = sentence[:,1:]
 
         inputs = inputs.to(self.config.device)
-
-        if self.config.model_type == "bert":
-            inp_padding_mask = inp_padding_mask.to(self.config.device)
-        else:
-            inp_padding_mask = tgt_padding_mask.to(self.config.device)
         tgt = tgt.to(self.config.device)
         label = label.to(self.config.device)
-        tgt_padding_mask = tgt_padding_mask.to(self.config.device)
+        padding_mask = padding_mask.to(self.config.device)
 
-        # m, memory = encoder(inputs, attention_mask=inp_padding_mask)
-        memory = self.encoder(inputs, attention_mask=inp_padding_mask)
-        out = self.decoder(tgt, memory, tgt_padding_mask=tgt_padding_mask)
+        # m, memory = encoder(inputs, attention_mask=padding_mask)
+        memory = self.encoder(inputs, attention_mask=padding_mask)
+        out = self.decoder(tgt, memory, tgt_padding_mask=padding_mask)
         # make_dot(out).render(str(self.output_dir + "graph"))
 
         out = out[:-1].contiguous().view(-1, out.shape[-1])
@@ -161,8 +155,8 @@ class Trainer:
         losses = []
         train_itr = tqdm.tqdm(self.train_dataloader, leave=False, ncols=180, file=self.out)
         n = epoch * len(train_itr)
-        for sentence, inp_padding_mask, tgt_padding_mask in train_itr:
-            loss_item, cross_entropy_item, mmd_item = self.train_process(sentence, inp_padding_mask, tgt_padding_mask, n)
+        for sentence, padding_mask in train_itr:
+            loss_item, cross_entropy_item, mmd_item = self.train_process(sentence, padding_mask, n)
             losses.append(loss_item)
             # train_itr.set_postfix({"loss":loss.item(), "ce_loss":cross_entropy.item() , "weight":kl_weight, "kl_loss":kl_loss.item()})
             train_itr.set_postfix({"loss":loss_item, "ce_loss":cross_entropy_item , "mmd":mmd_item})
