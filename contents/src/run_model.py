@@ -17,11 +17,10 @@ import tqdm
 
 import sentencepiece as spm
 
-from transformers import BertModel
 # from torchviz import make_dot
 
 from bert_dataloader import get_dataloader
-from encoder_decoder import Bert_Encoder_vae, transformer_Decoder, Transformer_Embedding, transformer_Encoder
+from encoder_decoder import transformer_Decoder, Transformer_Embedding, transformer_Encoder
 from config import Config
 from losses import VaeLoss, MmdLoss
 
@@ -40,11 +39,7 @@ class Trainer:
         print(args.output_dir)
         print("encoder = {}, decoder = {}".format(self.config.encoder_device, self.config.decoder_device))
 
-        if self.config.model_type == "bert":
-            self.encoder = Bert_Encoder_vae(args.bert_path)
-            self.config.d_model = self.encoder.bert.config.hidden_size
-            embedding_model = self.encoder.bert.get_input_embeddings()
-        elif self.config.model_type == "transformer":
+        if self.config.model_type == "transformer":
             embedding_model = Transformer_Embedding(self.config)
             self.encoder = transformer_Encoder(self.config, embedding_model, nn.LayerNorm(self.config.d_model))
             # self.encoder = transformer_Encoder(self.config, Transformer_Embedding(self.config), nn.LayerNorm(self.config.d_model))
@@ -58,13 +53,7 @@ class Trainer:
         self.train_dataloader = get_dataloader(self.train_dataset, self.config.batch_size, pad_index=3, bos_index=1, eos_index=2, fix_len = self.config.max_len)
 
         # self.loss_func = VaeLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), self.config, len(train_dataloader)).forward
-        # self.loss_func = MmdLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), self.config).forward
         self.loss_func = MmdLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='mean'), self.config).forward
-        # cross_entropy_weight = torch.ones(self.config.n_vocab, device=self.config.decoder_device)
-        # cross_entropy_weight[2] = 20
-        # cross_entropy_weight[3] = 0.05
-        # self.loss_func = MmdLoss(nn.CrossEntropyLoss(weight=cross_entropy_weight, ignore_index=3, reduction='mean'), self.config).forward
-        # self.loss_func = MmdLoss(nn.CrossEntropyLoss(weight=cross_entropy_weight, reduction='mean'), self.config).forward
         self.config.save_json(str(self.output_dir / "hyper_param.json"))
 
         self.decoder = transformer_Decoder(self.config, embedding_model, nn.LayerNorm(self.config.d_model))
@@ -78,12 +67,6 @@ class Trainer:
         if self.config.optim_type == "Adam":
             self.encoder_opt = optim.Adam(self.encoder.parameters(), lr=self.config.lr)
             self.decoder_opt = optim.Adam(self.decoder.parameters(), lr=self.config.lr)
-        elif self.config.optim_type == "RAdam":
-            self.encoder_opt = torch_optimizer.RAdam(self.encoder.parameters(), lr=self.config.lr)
-            self.decoder_opt = torch_optimizer.RAdam(self.decoder.parameters(), lr=self.config.lr)
-        elif self.config.optim_type == "Yogi":
-            self.encoder_opt = torch_optimizer.Yogi(self.encoder.parameters())
-            self.decoder_opt = torch_optimizer.Yogi(self.decoder.parameters())
         else:
             print("optim_type missmatch")
             exit()
@@ -187,7 +170,6 @@ class Trainer:
         train_itr = tqdm.tqdm(self.train_dataloader, leave=False, ncols=180, file=self.out)
         n = epoch * len(train_itr)
         for sentence, inp_padding_mask, tgt_padding_mask in train_itr:
-        # for sentence, _ in train_itr:
             loss_item, cross_entropy_item, mmd_item = self.train_process(sentence, inp_padding_mask, tgt_padding_mask, n)
             losses.append(loss_item)
             # train_itr.set_postfix({"loss":loss.item(), "ce_loss":cross_entropy.item() , "weight":kl_weight, "kl_loss":kl_loss.item()})
@@ -230,8 +212,7 @@ class Trainer:
             inp_mask = torch.tensor([[False]*input_s.shape[1] + [True]*(self.config.max_len - input_s.shape[1])], device=self.config.encoder_device)
             pad = torch.full((1, self.config.max_len - input_s.shape[1]), 3, dtype=torch.long, device=self.config.encoder_device)
             input_s = torch.cat((input_s, pad), dim=1)
-            # _, memory = self.encoder(input_s)
-            # memory = self.encoder(input_s)
+            # _, memory = self.encoder(input_s, attention_mask=inp_mask)
             memory = self.encoder(input_s, attention_mask=inp_mask)
             memory = memory.to(self.config.decoder_device)
 
@@ -264,7 +245,6 @@ if __name__ == "__main__":
     parser.add_argument("-o", "--output_dir", required=True)
     parser.add_argument("-l", "--log_dir", required=True)
     parser.add_argument("-p", "--hyper_param", required=True)
-    parser.add_argument("-b", "--bert_path", required=True)
     parser.add_argument("--pt_file")
     args = parser.parse_args()
 
