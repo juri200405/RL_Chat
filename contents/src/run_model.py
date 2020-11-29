@@ -44,9 +44,12 @@ class Trainer:
             exit()
 
         with open(args.input_file, 'rb') as f:
-            self.train_dataset = pickle.load(f)
+            dataset = pickle.load(f)
+        val_size = 32 * self.config.batch_size
+        train_dataset, self.val_dataset = torch.utils.data.random_split(dataset, [len(dataset)-val_size, val_size])
 
-        self.train_dataloader = get_dataloader(self.train_dataset, self.config.batch_size, pad_index=3, bos_index=1, eos_index=2, fix_len = self.config.max_len)
+        self.train_dataloader = get_dataloader(train_dataset, self.config.batch_size, pad_index=3, bos_index=1, eos_index=2, fix_len = self.config.max_len)
+        self.val_dataloader = get_dataloader(self.val_dataset, self.config.batch_size, pad_index=3, bos_index=1, eos_index=2, fix_len = self.config.max_len, shuffle=False)
 
         # self.loss_func = VaeLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='sum'), self.config, len(train_dataloader)).forward
         self.loss_func = MmdLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='mean'), self.config).forward
@@ -86,14 +89,12 @@ class Trainer:
             f.write("\n{}".format(text))
 
     def run(self):
+        self.num_val = 0
         self.out = open(str(self.log_dir / "log"), 'wt', encoding='utf-8')
         t_itr = tqdm.trange(self.config.num_epoch, leave=False, ncols=180, file=self.out)
         for epoch in t_itr:
-            train_loss = self.train(epoch)
-            t_itr.set_postfix({"ave_loss":train_loss})
-            self.writer.add_scalar('Loss/average', train_loss, epoch)
-
-            input_data, output_data = self.test()
+            self.train(epoch)
+            input_data, output_data, rand_sample = self.test()
             output_text = '"{}","{}"'.format(self.sp.decode(input_data), self.sp.decode(output_data))
             self.text_logger(t_itr, "epoch_output_text", output_text, epoch)
 
@@ -102,14 +103,14 @@ class Trainer:
                     'encoder_state_dict': self.encoder.state_dict(),
                     'decoder_state_dict': self.decoder.state_dict(),
                     'encoder_opt_state_dict': self.encoder_opt.state_dict(),
-                    'decoder_opt_state_dict': self.decoder_opt.state_dict(),
-                    'train_loss': train_loss},
+                    'decoder_opt_state_dict': self.decoder_opt.state_dict()
+                    },
                 str(self.output_dir / "epoch{:03d}.pt".format(epoch)))
 
         self.writer.close()
         self.out.close()
 
-    def train_process(self, sentence, padding_mask, step):
+    def forward(self, sentence, padding_mask, step):
         inputs = sentence[:,:]
         tgt = sentence[:,:]
         label = sentence[:,1:]
@@ -127,8 +128,14 @@ class Trainer:
         out = out[:-1].contiguous().view(-1, out.shape[-1])
         label = label.transpose(0,1).contiguous().view(-1)
 
-        # loss, cross_entropy, kl_loss, kl_weight = self.loss_func(out, label, m, step)
-        loss, cross_entropy, mmd = self.loss_func(out, label, memory)
+        # loss, cross_entropy, kl_loss, kl_weight
+        # return self.loss_func(out, label, m, step)
+
+        # loss, cross_entropy, mmd
+        return self.loss_func(out, label, memory)
+
+    def train_process(self, sentence, padding_mask, step):
+        loss, cross_entropy, mmd = self.forward(sentence, padding_mask, step)
         loss = loss / self.config.accumulate_size
 
         loss.backward()
@@ -152,19 +159,17 @@ class Trainer:
     def train(self, epoch):
         self.encoder.train()
         self.decoder.train()
-        losses = []
         train_itr = tqdm.tqdm(self.train_dataloader, leave=False, ncols=180, file=self.out)
         n = epoch * len(train_itr)
         for sentence, padding_mask in train_itr:
             loss_item, cross_entropy_item, mmd_item = self.train_process(sentence, padding_mask, n)
-            losses.append(loss_item)
             # train_itr.set_postfix({"loss":loss.item(), "ce_loss":cross_entropy.item() , "weight":kl_weight, "kl_loss":kl_loss.item()})
             train_itr.set_postfix({"loss":loss_item, "ce_loss":cross_entropy_item , "mmd":mmd_item})
-            self.writer.add_scalar('Loss/each',loss_item, n)
-            self.writer.add_scalar('Detail_Loss/cross_entropy', cross_entropy_item, n)
-            # self.writer.add_scalar('Detail_Loss/kl_loss', kl_loss.item(), n)
-            # self.writer.add_scalar('Detail_Loss/kl_weight', kl_weight, n)
-            self.writer.add_scalar('Detail_Loss/mmd', mmd_item, n)
+            self.writer.add_scalar('train/loss',loss_item, n)
+            self.writer.add_scalar('train/cross_entropy', cross_entropy_item, n)
+            # self.writer.add_scalar('train/kl_loss', kl_loss.item(), n)
+            # self.writer.add_scalar('train/kl_weight', kl_weight, n)
+            self.writer.add_scalar('train/mmd', mmd_item, n)
 
             if n % self.config.log_interval == 0:
                 torch.save({
@@ -172,28 +177,43 @@ class Trainer:
                         'encoder_state_dict': self.encoder.state_dict(),
                         'decoder_state_dict': self.decoder.state_dict(),
                         'encoder_opt_state_dict': self.encoder_opt.state_dict(),
-                        'decoder_opt_state_dict': self.decoder_opt.state_dict(),
-                        'train_loss': np.mean(losses)},
+                        'decoder_opt_state_dict': self.decoder_opt.state_dict()
+                        },
                     str(self.output_dir / "{:04d}k.pt".format(n//1000)))
 
-                input_ids, ids = self.test()
+                input_ids, ids, rand_ids = self.test()
                 output_text = '"{}","{}"'.format(self.sp.decode(input_ids), self.sp.decode(ids))
                 self.text_logger(train_itr, "step_output_text", output_text, n)
-                rand_ids = self.generate_sentence(torch.randn(1, self.config.n_latent, device=self.config.device))
-                self.text_logger(train_itr, "random_output_text", self.sp.decode(rand_ids[0]), n)
+                self.text_logger(train_itr, "random_output_text", self.sp.decode(rand_ids), n)
 
                 self.encoder.train()
                 self.decoder.train()
 
             n += 1
-        return np.mean(losses)
 
     def test(self):
         self.encoder.eval()
         self.decoder.eval()
-        data = random.choice(self.train_dataset)
 
         with torch.no_grad():
+            val_itr = tqdm.tqdm(self.val_dataloader, leave=False, ncols=180, file=self.out)
+            loss_items = []
+            ce_items = []
+            mmd_items = []
+            for sentence, padding_mask in val_itr:
+                loss, cross_entropy, mmd = self.forward(sentence, padding_mask, self.num_val)
+
+                loss_items.append(loss.item())
+                ce_items.append(cross_entropy.item())
+                mmd_items.append(mmd.item())
+                cross_entropy = None
+                mmd = None
+                loss = None
+            self.writer.add_scalar('val/loss',np.mean(loss_items), self.num_val)
+            self.writer.add_scalar('val/loss',np.mean(ce_items), self.num_val)
+            self.writer.add_scalar('val/loss',np.mean(mmd_items), self.num_val)
+
+            data = random.choice(self.val_dataset)
             input_s = torch.tensor([1] + data + [2], device=self.config.device).unsqueeze(0)
             inp_mask = torch.tensor([[False]*input_s.shape[1] + [True]*(self.config.max_len - input_s.shape[1])], device=self.config.device)
             pad = torch.full((1, self.config.max_len - input_s.shape[1]), 3, dtype=torch.long, device=self.config.device)
@@ -202,8 +222,10 @@ class Trainer:
             memory = self.encoder(input_s, attention_mask=inp_mask)
 
         ids = self.generate_sentence(memory)
+        rand_ids = self.generate_sentence(torch.randn(1, self.config.n_latent, device=self.config.device))
 
-        return data, ids[0]
+        self.num_val += 1
+        return data, ids[0], rand_ids[0]
 
     def generate_sentence(self, memory):
         self.encoder.eval()
