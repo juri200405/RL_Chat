@@ -45,7 +45,7 @@ class Trainer:
 
         with open(args.input_file, 'rb') as f:
             dataset = pickle.load(f)
-        val_size = 32 * self.config.batch_size
+        val_size = 32 * self.config.batch_size * self.config.accumulate_size
         train_dataset, self.val_dataset = torch.utils.data.random_split(dataset, [len(dataset)-val_size, val_size])
 
         self.train_dataloader = get_dataloader(train_dataset, self.config.batch_size, pad_index=3, bos_index=1, eos_index=2, fix_len = self.config.max_len)
@@ -210,8 +210,8 @@ class Trainer:
                 mmd = None
                 loss = None
             self.writer.add_scalar('val/loss',np.mean(loss_items), self.num_val)
-            self.writer.add_scalar('val/loss',np.mean(ce_items), self.num_val)
-            self.writer.add_scalar('val/loss',np.mean(mmd_items), self.num_val)
+            self.writer.add_scalar('val/cross_entropy',np.mean(ce_items), self.num_val)
+            self.writer.add_scalar('val/mmd',np.mean(mmd_items), self.num_val)
 
             data = random.choice(self.val_dataset)
             input_s = torch.tensor([1] + data + [2], device=self.config.device).unsqueeze(0)
