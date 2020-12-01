@@ -67,3 +67,4 @@ RUN echo "conda activate pl" >> ~/.bashrc
 # RUN pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./apex
 
 ENV PYTHONPATH src
+ENV LRU_CACHE_CAPACITY 1
