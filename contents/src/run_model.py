@@ -131,11 +131,11 @@ class Trainer:
         # loss, cross_entropy, kl_loss, kl_weight
         # return self.loss_func(out, label, m, step)
 
-        # loss, cross_entropy, mmd
-        return self.loss_func(out, label, memory)
+        loss, cross_entropy, mmd = self.loss_func(out, label, memory)
+        return loss, cross_entropy, mmd, memory
 
     def train_process(self, sentence, padding_mask, step):
-        loss, cross_entropy, mmd = self.forward(sentence, padding_mask, step)
+        loss, cross_entropy, mmd, _ = self.forward(sentence, padding_mask, step)
         loss = loss / self.config.accumulate_size
 
         loss.backward()
@@ -200,18 +200,28 @@ class Trainer:
             loss_items = []
             ce_items = []
             mmd_items = []
+            memorys = []
+            sentences = []
             for sentence, padding_mask in val_itr:
-                loss, cross_entropy, mmd = self.forward(sentence, padding_mask, self.num_val)
+                sentences.append(sentence.detach())
+                loss, cross_entropy, mmd, memory = self.forward(sentence, padding_mask, self.num_val)
 
                 loss_items.append(loss.item())
                 ce_items.append(cross_entropy.item())
                 mmd_items.append(mmd.item())
+                memorys.append(memory.cpu().detach())
                 cross_entropy = None
                 mmd = None
                 loss = None
             self.writer.add_scalar('val/loss',np.mean(loss_items), self.num_val)
             self.writer.add_scalar('val/cross_entropy',np.mean(ce_items), self.num_val)
             self.writer.add_scalar('val/mmd',np.mean(mmd_items), self.num_val)
+
+            memorys = torch.cat(memorys, dim=0)
+            memorys = torch.cat((memorys, torch.randn(1024, self.config.n_latent)), dim=0)
+            sentences = self.sp.decode(torch.cat(sentences, dim=0).tolist())
+            sentences += (["<RAND>"] * 1024)
+            self.writer.add_embedding(memorys, metadata=sentences, global_step=self.num_val)
 
             data = random.choice(self.val_dataset)
             input_s = torch.tensor([1] + data + [2], device=self.config.device).unsqueeze(0)
