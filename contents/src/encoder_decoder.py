@@ -42,7 +42,7 @@ class transformer_Encoder(nn.Module):
         
         self.fc = nn.Linear(config.max_len * config.d_model, config.mlp_n_hidden)
         self.memory2mean = nn.Linear(config.mlp_n_hidden, config.n_latent)
-        # self.memory2logv = nn.Linear(config.mlp_n_hidden, config.n_latent)
+        self.memory2logv = nn.Linear(config.mlp_n_hidden, config.n_latent)
         # self.tanh = nn.Tanh()
         self.relu = nn.LeakyReLU()
 
@@ -63,18 +63,19 @@ class transformer_Encoder(nn.Module):
 
         memory = self.relu(self.fc(out))
         mean = self.memory2mean(memory)
+
+        # return mean
+
         # logv = self.tanh(self.memory2logv(memory))
-        # logv = self.memory2logv(memory)
+        logv = self.memory2logv(memory)
 
         # v = torch.diag_embed(logv.exp())
         # m = MultivariateNormal(mean, covariance_matrix=v)
         # z = m.rsample()
         # return m, z
 
-        # z = self.reparameterize(mean, logv)
-        # return z
-
-        return mean
+        z = self.reparameterize(mean, logv)
+        return z
 
 class transformer_Decoder(nn.Module):
     def __init__(self, config, embedding, norm=None):
