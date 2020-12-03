@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 
 import torch
+from torch.utils.tensorboard import SummaryWriter
 import sentencepiece as spm
 import tqdm
 import numpy as np
@@ -11,11 +12,9 @@ from encoder_decoder import transformer_Encoder, Transformer_Embedding
 from config import Config
 
 class DBDC(torch.nn.Module):
-    def __init__(self, encoder, latent_size, hidden_size, ffl_hidden):
+    def __init__(self, latent_size, hidden_size, ffl_hidden):
         super(DBDC, self).__init__()
         self.hidden_size = hidden_size
-
-        self.encoder = encoder
 
         self.gru = torch.nn.GRU(input_size=latent_size, hidden_size=hidden_size, batch_first=True)
         self.fc1 = torch.nn.Linear(hidden_size, ffl_hidden)
@@ -24,11 +23,7 @@ class DBDC(torch.nn.Module):
         self.relu = torch.nn.LeakyReLU()
         self.sigmoid = torch.nn.Sigmoid()
 
-    def forward(self, x, mask, conv_len):
-        with torch.no_grad():
-            x = self.encoder(x, attention_mask=mask)
-            x = x.view(conv_len.shape[0], -1, x.shape[1])
-
+    def forward(self, x, conv_len):
         hidden = torch.zeros(1, x.shape[0], self.hidden_size, device=x.device)
         outputs, _ = self.gru(x, hidden)
 
@@ -38,6 +33,12 @@ class DBDC(torch.nn.Module):
         out = self.fc1(out)
         out = self.fc2(self.relu(out))
         return self.sigmoid(out).squeeze()
+
+def encode(x, mask, batchsize, encoder):
+    with torch.no_grad():
+        x = encoder(x, attention_mask=mask)
+        x = x.view(batchsize, -1, x.shape[1])
+    return x
 
 def process_data(pair, sp, max_len):
     data = pair["utterances"]
@@ -97,7 +98,7 @@ if __name__ == "__main__":
 
     sp = spm.SentencePieceProcessor(model_file=args.spm_model)
 
-    writer = torch.utils.tensorboard.SummaryWriter(log_dir=args.output_dir)
+    writer = SummaryWriter(log_dir=args.output_dir)
     with open(str(Path(args.output_dir)/"dbdc_model_param.json"), "wt", encoding="utf-8") as f:
         json.dump(vars(args), f)
 
@@ -105,6 +106,8 @@ if __name__ == "__main__":
 
     checkpoint = torch.load(args.vae_checkpoint, map_location="cpu")
     encoder.load_state_dict(checkpoint["encoder_state_dict"])
+    encoder.to(device)
+    encoder.eval()
 
     with open(args.data_file, "rt", encoding="utf-8") as f:
         datas = json.load(f)
@@ -127,7 +130,7 @@ if __name__ == "__main__":
             pin_memory=True
             )
 
-    model = DBDC(encoder, config.n_latent, args.gru_hidden, args.ff_hidden)
+    model = DBDC(config.n_latent, args.gru_hidden, args.ff_hidden)
     model.to(device)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     loss_func = torch.nn.MSELoss()
@@ -135,7 +138,8 @@ if __name__ == "__main__":
     for i in tqdm.tqdm(range(args.num_epoch)):
         for n, item in enumerate(tqdm.tqdm(train_dataloader)):
             model.train()
-            out = model(item["input"].to(device), item["mask"].to(device), item["conv_len"].to(device))
+            x = encode(item["input"].to(device), item["mask"].to(device), item["conv_len"].shape[0], encoder)
+            out = model(x, item["conv_len"].to(device))
             loss = loss_func(out, item["score"].to(device))
             opt.zero_grad()
             loss.backward()
@@ -145,7 +149,8 @@ if __name__ == "__main__":
         val_loss = []
         for item in tqdm.tqdm(val_dataloader):
             model.eval()
-            out = model(item["input"].to(device), item["mask"].to(device), item["conv_len"].to(device))
+            x = encode(item["input"].to(device), item["mask"].to(device), item["conv_len"].shape[0], encoder)
+            out = model(x, item["conv_len"].to(device))
             loss = loss_func(out, item["score"].to(device))
             val_loss.append(loss.item())
         writer.add_scalar("val/loss", np.mean(val_loss), i)
