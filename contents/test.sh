@@ -2,10 +2,10 @@
 
 python src/chat_main.py \
 	-s data/tomioka/telegram_setting.json \
-	-m data/tomioka/laboroai_bert/large/webcorpus.model \
-	-p data/tomioka/chat_hp.json \
-	-o data/tomioka/output/rl_chat/2020_07_14 \
-	--pt_file data/tomioka/output/bert_gru_transformer/2020_06_05/cuda_epoch199.pt \
+	-m data/tomioka/spm_model/no_kwdlc.model \
+	-o data/tomioka/output/rl_chat/2020_12_04 \
+	--vae_checkpoint data/tomioka/output/transformer_vae/2020_12_02/3/0400k.pt \
 	--bert_path data/tomioka/laboroai_bert/large/converted/ \
 	--database data/tomioka/database.json \
-	$@
+	--batch_size 64 \
+	--sample_size 128

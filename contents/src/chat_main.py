@@ -28,18 +28,20 @@ if __name__ == '__main__':
     parser.add_argument("-p", "--hyper_param", required=True)
 
     # エンコーダデコーダのパラメータ
-    parser.add_argument("--pt_file")
+    parser.add_argument("--vae_checkpoint")
     
     parser.add_argument("--database")
 
     parser.add_argument("--telegram", action="store_true")
 
     parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--sample_size", type=int, default=128)
     
     args = parser.parse_args()
 
+    hyper_param = Path(args.vae_checkpoint).with_name("hyper_param.json")
     config = Config()
-    config.load_json(args.hyper_param)
+    config.load_json(hyper_param)
 
     embedding = encoder_decoder.Transformer_Embedding(config)
     encoder = encoder_decoder.transformer_Encoder(config, embedding, nn.LayerNorm(config.d_model))
@@ -69,7 +71,7 @@ if __name__ == '__main__':
 
     Thread(target=agent.learn, daemon=True).start()
 
-    system = ChatSystem(database, agent, hyperp["sample_size"])
+    system = ChatSystem(database, agent, args.sample_size)
     
     if args.telegram:
         bot = TelegramBot(system, args.setting_file)
