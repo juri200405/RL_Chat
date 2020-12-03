@@ -62,15 +62,15 @@ class Policy_network(nn.Module):
         return action, mean, log_prob
 
 class Agent:
-    def __init__(self, device, writer):
+    def __init__(self, n_latent, device, writer):
         self.device = device
 
-        self.gru = nn.GRU(input_size=1024, hidden_size=1024)
-        self.policy = Policy_network()
-        self.qf1 = Q_network()
-        self.qf2 = Q_network()
-        self.target_qf1 = Q_network()
-        self.target_qf2 = Q_network()
+        self.gru = nn.GRU(input_size=n_latent, hidden_size=1024)
+        self.policy = Policy_network(obs_size=n_latent, output_size=n_latent)
+        self.qf1 = Q_network(obs_size=n_latent, action_size=n_latent)
+        self.qf2 = Q_network(obs_size=n_latent, action_size=n_latent)
+        self.target_qf1 = Q_network(obs_size=n_latent, action_size=n_latent)
+        self.target_qf2 = Q_network(obs_size=n_latent, action_size=n_latent)
         self.log_alpha = torch.tensor([0.1], requires_grad=True, device=device)
 
         self.target_entropy = -1024
@@ -199,29 +199,41 @@ class Agent:
 
 
 class Chat_Module:
-    def __init__(self, spm_model, encoder, decoder, encoder_device="cpu", decoder_device="cpu", learning_agent_device="cpu", chat_agent_device="cpu", batch_size=64, writer=None):
+    def __init__(
+            self,
+            spm_model,
+            encoder,
+            decoder,
+            encoder_device="cpu",
+            decoder_device="cpu",
+            learning_agent_device="cpu",
+            chat_agent_device="cpu",
+            batch_size=64,
+            n_latent=1024,
+            writer=None
+            ):
         self.sp = spm_model
 
-        # encoderのBERT内に組み込まれている BertEmbeddings をdecoderで使うため、GPUに送る順番は decoder->encoder
-        self.decoder = decoder.to(decoder_device)
         self.encoder = encoder.to(encoder_device)
+        self.decoder = decoder.to(decoder_device)
         self.decoder.eval()
         self.encoder.eval()
 
         self.encoder_device = encoder_device
         self.decoder_device = decoder_device
 
-        self.learning_agent = Agent(learning_agent_device, writer=writer)
-        self.chat_agent = Agent(chat_agent_device, writer=writer)
+        self.learning_agent = Agent(n_latent, learning_agent_device, writer=writer)
+        self.chat_agent = Agent(n_latent, chat_agent_device, writer=writer)
         self.last_param = self.learning_agent.state_dict() 
 
         self.sample_queue = Queue()
         self.batch_size = batch_size
+        self.max_len = max_len
 
     def make_utt(self, usr_utt, hidden):
         self.chat_agent.eval()
         with torch.no_grad():
-            state = self.encode(usr_utt) # state = (1, batch(1), 1024)
+            state = self.encode(usr_utt) # state = (batch(1), n_latent)
             obs, next_hidden = self.chat_agent.gru(state.to(self.chat_agent.device), hidden.to(self.chat_agent.device)) # obs = (1, batch(1), 1024), hidden = (1, batch(1), 1024)
             action, _, _ = self.chat_agent.policy.sample(obs)
 
@@ -233,23 +245,18 @@ class Chat_Module:
 
     def decode(self, memory, max_length):
         with torch.no_grad():
-            tgt = torch.full((1, max_length), 0, dtype=torch.long, device=self.encoder_device)
-            tgt_key_padding_mask = torch.full((1, max_length), True, dtype=torch.bool, device=self.decoder_device)
-            t_word = 1 # <s>
-            ids = []
-            for t in range(max_length):
-                tgt[0][t] = t_word
-                tgt_key_padding_mask[0][t] = False
-                out = self.decoder(tgt, memory, tgt_padding_mask=tgt_key_padding_mask)
-                _, topi = out.topk(1)
-                next_word = topi[t].item()
-                ids.append(next_word)
-                if next_word == 2: # </s>
+            tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.config.device)  # <s>
+            unfinish = torch.ones(memory.shape[0], 1, dtype=torch.long, device=self.config.device)
+            while tgt.shape[1] <= self.config.max_len:
+                out = self.decoder(tgt, memory)
+                _, topi = out.transpose(0,1).topk(1)
+                next_word = topi[:,-1]
+                next_word = next_word*unfinish + (3)*(1-unfinish)
+                tgt = torch.cat((tgt, next_word), dim=-1)
+                unfinish = unfinish * (~(next_word == 2)).long()
+                if unfinish.max() == 0: # </s>
                     break
-                else:
-                    t_word = next_word
-            print(ids)
-        return self.sp.decode(ids)
+        return self.sp.decode(tgt.cpu().tolist())
 
     def update_param(self, sample):
         self.sample_queue.put(sample)
@@ -260,8 +267,11 @@ class Chat_Module:
 
     def encode(self, utt):
         with torch.no_grad():
-            input_tensor = torch.LongTensor([1] + self.sp.encode(utt) + [2]).unsqueeze(0).to(self.encoder_device)
-            state = self.encoder(input_tensor) # state = (1, batch(1), 1024)
+            input_s = torch.LongTensor([1] + self.sp.encode(utt) + [2], device=self.encoder_device).unsqueeze(0)
+            inp_mask = torch.tensor([[False]*input_s.shape[1] + [True]*(self.max_len - input_s.shape[1])], device=self.encoder_device)
+            pad = torch.full((1, self.max_len - input_s.shape[1]), 3, dtype=torch.long, device=self.encoder_device)
+            input_s = torch.cat((input_s, pad), dim=1)
+            state = self.encoder(input_s, attention_mask=inp_mask) # state = (batch(1), n_latent)
         return state
 
     def make_batch(self, sample):

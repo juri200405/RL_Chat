@@ -15,6 +15,7 @@ import encoder_decoder
 from agent import Chat_Module
 from database import Database
 from chat_system import ChatSystem
+from config import Config
 
 from my_telegram_bot import TelegramBot
 
@@ -29,32 +30,23 @@ if __name__ == '__main__':
     # エンコーダデコーダのパラメータ
     parser.add_argument("--pt_file")
     
-    # BERTのpre-trainモデルへのパス
-    parser.add_argument("--bert_path")
-
     parser.add_argument("--database")
 
     parser.add_argument("--telegram", action="store_true")
+
+    parser.add_argument("--batch_size", type=int, default=64)
     
     args = parser.parse_args()
 
-    with open(args.hyper_param, 'rt') as f:
-        hyperp = json.load(f)
+    config = Config()
+    config.load_json(args.hyper_param)
 
-    encoder = encoder_decoder.Bert_Encoder_gru(args.bert_path)
-    decoder = encoder_decoder.transformer_Decoder(
-            hyperp["n_vocab"],
-            hyperp["d_model"],
-            hyperp["n_head"],
-            hyperp["n_hidden"],
-            hyperp["decoder_nlayers"],
-            encoder.bert.get_input_embeddings(),
-            nn.LayerNorm(hyperp["d_model"]),
-            dropout=hyperp["dropout"]
-            )
+    embedding = encoder_decoder.Transformer_Embedding(config)
+    encoder = encoder_decoder.transformer_Encoder(config, embedding, nn.LayerNorm(config.d_model))
+    decoder = encoder_decoder.transformer_Decoder(config, embedding, nn.LayerNorm(config.d_model))
 
     if args.pt_file is not None:
-        checkpoint = torch.load(args.pt_file)
+        checkpoint = torch.load(args.pt_file, map_location="cpu")
         encoder.load_state_dict(checkpoint["encoder_state_dict"])
         decoder.load_state_dict(checkpoint["decoder_state_dict"])
 
@@ -71,7 +63,7 @@ if __name__ == '__main__':
             decoder_device=torch.device("cuda", 0),
             learning_agent_device=torch.device("cuda", 1),
             chat_agent_device=torch.device("cuda", 1),
-            batch_size=hyperp["batch_size"],
+            batch_size=args.batch_size,
             writer=writer
             )
 
