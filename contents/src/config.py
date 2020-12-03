@@ -29,8 +29,7 @@ class Config:
         self._dropout = 0.1
         self._lr = 0.001
 
-        self._encoder_device = torch.device('cpu')
-        self._decoder_device = torch.device('cpu')
+        self._device = torch.device('cpu')
         self._device_name = 'cpu'
 
         self._model_list = ["bert", "transformer"]
@@ -179,18 +178,11 @@ class Config:
         self._lr = value
 
     @property
-    def encoder_device(self) -> torch.device:
-        return self._encoder_device
-    @encoder_device.setter
-    def encoder_device(self, value: torch.device) -> None:
-        self._encoder_device = value
-
-    @property
-    def decoder_device(self) -> torch.device:
-        return self._decoder_device
-    @decoder_device.setter
-    def decoder_device(self, value: torch.device) -> None:
-        self._decoder_device = value
+    def device(self) -> torch.device:
+        return self._device
+    @device.setter
+    def device(self, value: torch.device) -> None:
+        self._device = value
 
 
     def load_json(self, filename: str) -> None:
@@ -225,26 +217,11 @@ class Config:
         use_gpus = hyperp["use_gpus"]
 
         device_num = torch.cuda.device_count()
-        if len(use_gpus) > 1:
-            if device_num > 1:
-                self.encoder_device = torch.device('cuda', use_gpus[0])
-                self.decoder_device = torch.device('cuda', use_gpus[1])
-                self._device_name = "cuda"
-            elif device_num == 1:
-                self.encoder_device = self.decoder_device = torch.device('cuda', use_gpus[0])
-                self._device_name = "cuda"
-            else:
-                self.encoder_device = self.decoder_device = torch.device('cpu')
-                self._device_name = "cpu"
-        elif len(use_gpus) == 1:
-            if device_num >= 1:
-                self.encoder_device = self.decoder_device = torch.device('cuda', use_gpus[0])
-                self._device_name = "cuda"
-            else:
-                self.encoder_device = self.decoder_device = torch.device('cpu')
-                self._device_name = "cpu"
+        if (len(use_gpus) > 0) and (device_num > 0):
+            self.device = torch.device('cuda', use_gpus[0])
+            self._device_name = "cuda"
         else:
-            self.encoder_device = self.decoder_device = torch.device('cpu')
+            self.device = torch.device('cpu')
             self._device_name = "cpu"
 
     def save_json(self, filename: str) -> None:
@@ -278,12 +255,8 @@ class Config:
         if self._device_name == "cpu":
             hyperp["use_gpus"] = []
         else:
-            e = self.encoder_device.index
-            d = self.decoder_device.index
-            if e == d:
-                hyperp["use_gpus"] = [e]
-            else:
-                hyperp["use_gpus"] = [e, d]
+            d = self.device.index
+            hyperp["use_gpus"] = [d]
 
         with open(filename, 'wt', encoding='utf-8') as f:
             json.dump(hyperp, f)

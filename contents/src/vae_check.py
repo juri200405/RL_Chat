@@ -10,8 +10,6 @@ import tqdm
 
 import sentencepiece as spm
 
-from transformers import BertModel
-
 from bert_dataloader import get_dataloader
 from encoder_decoder import transformer_Decoder, transformer_Encoder, Transformer_Embedding
 from config import Config

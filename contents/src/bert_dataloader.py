@@ -18,10 +18,9 @@ def get_collate_fn(pad_index=0, bos_index=1, eos_index=2, fix_max_len=None, fix_
             padded_sequence = torch.cat((padded_sequence, pad), dim=1)
 
         ids_len = [item.shape[0] for item in tensors]
-        inp_padded_mask = [[1.0]*i + [0.0]*(padded_sequence.shape[1]-i) for i in ids_len]
-        tgt_padded_mask = [[False]*i + [True]*(padded_sequence.shape[1]-i) for i in ids_len]
+        padding_mask = [[False]*i + [True]*(padded_sequence.shape[1]-i) for i in ids_len]
 
-        return padded_sequence, torch.tensor(inp_padded_mask), torch.tensor(tgt_padded_mask)
+        return padded_sequence, torch.tensor(padding_mask)
 
     return _f
 
