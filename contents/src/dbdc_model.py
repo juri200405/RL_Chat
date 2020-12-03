@@ -135,6 +135,14 @@ if __name__ == "__main__":
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     loss_func = torch.nn.MSELoss()
 
+    val_loss = []
+    for item in tqdm.tqdm(val_dataloader):
+        model.eval()
+        x = encode(item["input"].to(device), item["mask"].to(device), item["conv_len"].shape[0], encoder)
+        out = model(x, item["conv_len"].to(device))
+        loss = loss_func(out, item["score"].to(device))
+        val_loss.append(loss.item())
+    writer.add_scalar("val/initial", np.mean(val_loss), 0)
     for i in tqdm.tqdm(range(args.num_epoch)):
         for n, item in enumerate(tqdm.tqdm(train_dataloader)):
             model.train()
