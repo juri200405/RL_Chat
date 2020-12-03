@@ -143,6 +143,8 @@ if __name__ == "__main__":
         loss = loss_func(out, item["score"].to(device))
         val_loss.append(loss.item())
     writer.add_scalar("val/initial", np.mean(val_loss), 0)
+
+    val_losses = []
     for i in tqdm.tqdm(range(args.num_epoch)):
         for n, item in enumerate(tqdm.tqdm(train_dataloader)):
             model.train()
@@ -161,7 +163,9 @@ if __name__ == "__main__":
             out = model(x, item["conv_len"].to(device))
             loss = loss_func(out, item["score"].to(device))
             val_loss.append(loss.item())
-        writer.add_scalar("val/loss", np.mean(val_loss), i)
+        losses = np.mean(val_loss)
+        writer.add_scalar("val/loss", losses, i)
+        val_losses.append(losses)
 
         torch.save({
             "epoch": i,
@@ -169,5 +173,6 @@ if __name__ == "__main__":
             "opt_state_dict": opt.state_dict()
             }, str(Path(args.output_dir)/"epoch{:03d}.pt".format(i)))
 
-    writer.add_scalar("val/loss", np.mean(val_loss), i)
+    min_loss = min(val_losses)
+    writer.add_hparams(vars(args), {"hparam/minloss": min_loss, "hparam/minloss_epoch": val_losses.index(min_loss)})
     writer.close()
