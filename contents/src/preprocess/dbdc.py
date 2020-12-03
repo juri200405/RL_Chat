@@ -3,6 +3,8 @@ import argparse
 from pathlib import Path
 import unicodedata
 
+import numpy as np
+
 def normalize_string(s):
     '''
     文s中に含まれる文字を正規化。
@@ -54,6 +56,24 @@ def make_dialog_database(input_dir, output_file):
     with open(output_file, 'wt', encoding='utf-8') as f:
         json.dump(utterances, f)
 
+def make_dbdc_data(input_dir):
+    score_dict = {"O":1.0, "T":0.5, "X":0.0}
+    datas = []
+    for filename in Path(input_dir).glob("**/*.json"):
+        if 'en' not in filename.parts:
+            print(filename)
+            with open(filename, 'rt', encoding='utf-8') as f:
+                data = json.loads(f.read())
+
+            utterances = []
+            for i, item in enumerate(data["turns"]):
+                utterances.append(normalize_string(item["utterance"]))
+                if item["speaker"] == "S":
+                    score = np.mean([score_dict[anno_item["breakdown"]] for anno_item in item["annotations"]])
+                    datas.append({"utterances":utterances.copy(), "score":score})
+    return datas
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("file_type")
@@ -65,5 +85,9 @@ if __name__ == "__main__":
         make_uttrence_list(args.inputdir, args.outputfile)
     elif args.file_type == "database":
         make_dialog_database(args.inputdir, args.outputfile)
+    elif args.file_type == "dbdc_data":
+        datas = make_dbdc_data(args.inputdir)
+        with open(args.outputfile, 'wt', encoding='utf-8') as f:
+            json.dump(datas, f)
     else:
-        print('file_type should be "utt_list" or "database"')
+        print('file_type should be ["utt_list","database","dbdc_data"]')
