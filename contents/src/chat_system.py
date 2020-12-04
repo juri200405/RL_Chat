@@ -43,6 +43,7 @@ class ChatSystem:
             session_state = self.states[input_dict["sessionId"]]
             if session_state["inprogress"]:
                 utt, hidden = self.agent.make_utt(input_dict["utt"], session_state["hidden"])
+                utt = utt[0]
                 session_state["hidden"] = hidden
                 session_state["memory"].append({"usr_utt":input_dict["utt"], "sys_utt":utt})
                 # output_dict = {'utt':utt, 'markup': self.reply_markup}
