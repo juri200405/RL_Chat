@@ -16,9 +16,10 @@ from config import Config
 
 
 class VAE_tester:
-    def __init__(self, config, sp):
+    def __init__(self, config, sp, device):
         self.sp = sp
         self.config = config
+        self.device = device
 
         embedding = Transformer_Embedding(config)
         self.encoder = transformer_Encoder(config, embedding, nn.LayerNorm(config.d_model))
@@ -28,6 +29,8 @@ class VAE_tester:
         checkpoint = torch.load(pt_file, map_location="cpu")
         self.encoder.load_state_dict(checkpoint["encoder_state_dict"])
         self.decoder.load_state_dict(checkpoint["decoder_state_dict"])
+        self.encoder.to(self.device)
+        self.decoder.to(self.device)
         self.encoder.eval()
         self.decoder.eval()
 
@@ -38,16 +41,16 @@ class VAE_tester:
             inp_mask = torch.tensor([[False]*input_s.shape[1] + [True]*(self.config.max_len - input_s.shape[1])])
             pad = torch.full((1, self.config.max_len - input_s.shape[1]), 3, dtype=torch.long)
             input_s = torch.cat((input_s, pad), dim=1)
-            memory = self.encoder(input_s, attention_mask=inp_mask)
+            memory = self.encoder(input_s.to(self.device), attention_mask=inp_mask.to(self.device))
         return memory
 
     def generate(self, memory):
         with torch.no_grad():
-            tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long)  # <s>
+            tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.device)  # <s>
             # tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long)
-            unfinish = torch.ones(memory.shape[0], 1, dtype=torch.long)
+            unfinish = torch.ones(memory.shape[0], 1, dtype=torch.long, device=self.device)
             while tgt.shape[1] <= self.config.max_len:
-                out = self.decoder(tgt, memory)
+                out = self.decoder(tgt, memory.to(self.device))
                 _, topi = out.transpose(0,1).topk(1)
                 next_word = topi[:,-1]
                 next_word = next_word*unfinish + (3)*(1-unfinish)
@@ -55,7 +58,7 @@ class VAE_tester:
                 unfinish = unfinish * (~(next_word == 2)).long()
                 if unfinish.max() == 0: # </s>
                     break
-        return self.sp.decode(tgt.tolist())
+        return self.sp.decode(tgt.cpu().tolist())
 
     def reconstract(self, sentence):
         memory = self.encode(sentence)
@@ -65,15 +68,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-m", "--spm_model", required=True)
     parser.add_argument("-i", "--input_file", required=True)
-    parser.add_argument("-p", "--hyper_param", required=True)
     parser.add_argument("--pt_file")
     args = parser.parse_args()
 
     sp = spm.SentencePieceProcessor(model_file=args.spm_model)
-    config = Config()
-    config.load_json(args.hyper_param)
 
-    tester = VAE_tester(config, sp)
+    hyper_param = Path(args.pt_file).with_name("hyper_param.json")
+    config = Config()
+    config.load_json(str(hyper_param))
+
+    tester = VAE_tester(config, sp, "cuda:2")
     tester.load_pt(args.pt_file)
 
     with open(args.input_file, 'rb') as f:
@@ -84,3 +88,6 @@ if __name__ == "__main__":
         output_sentence = tester.reconstract(input_sentence)
         output_text = "\n{}\n-> {}\n".format(input_sentence, output_sentence)
         print(output_text)
+
+    memorys = torch.randn(20, config.n_latent)
+    print("\n".join(tester.generate(memorys)))
