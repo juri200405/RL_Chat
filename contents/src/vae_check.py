@@ -49,8 +49,9 @@ class VAE_tester:
             tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.device)  # <s>
             # tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long)
             unfinish = torch.ones(memory.shape[0], 1, dtype=torch.long, device=self.device)
+            memory = memory.to(self.device)
             while tgt.shape[1] <= self.config.max_len:
-                out = self.decoder(tgt, memory.to(self.device))
+                out = self.decoder(tgt, memory)
                 _, topi = out.transpose(0,1).topk(1)
                 next_word = topi[:,-1]
                 next_word = next_word*unfinish + (3)*(1-unfinish)
