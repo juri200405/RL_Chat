@@ -9,6 +9,7 @@ import torch.nn as nn
 import tqdm
 
 import sentencepiece as spm
+import transformers
 
 from bert_dataloader import get_dataloader
 from encoder_decoder import transformer_Decoder, transformer_Encoder, Transformer_Embedding
@@ -47,10 +48,9 @@ class VAE_tester:
     def generate(self, memory):
         with torch.no_grad():
             tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.device)  # <s>
-            # tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long)
             unfinish = torch.ones(memory.shape[0], 1, dtype=torch.long, device=self.device)
             memory = memory.to(self.device)
-            while tgt.shape[1] <= self.config.max_len:
+            while tgt.shape[1] < self.config.max_len:
                 out = self.decoder(tgt, memory)
                 _, topi = out.transpose(0,1).topk(1)
                 next_word = topi[:,-1]
@@ -60,6 +60,45 @@ class VAE_tester:
                 if unfinish.max() == 0: # </s>
                     break
         return self.sp.decode(tgt.cpu().tolist())
+
+    def beam_generate(self, memory, num_beams):
+        batch_size = memory.shape[0]
+        vocab_size = self.config.n_vocab
+        beam_scorer = transformers.BeamSearchScorer(batch_size=batch_size, max_length=self.config.max_len, num_beams=num_beams, device=self.device)
+        with torch.no_grad():
+            memory_list = torch.split(memory, 1)
+            memory_list = [torch.cat([item]*num_beams) for item in memory_list]
+            memory = torch.cat(memory_list)
+            memory = memory.to(self.device)
+
+            beam_scores = torch.zeros((batch_size, num_beams), dtype=torch.float, device=self.device)
+            beam_scores[:,1:] = -1e9
+            beam_scores = beam_scores.view((batch_size * num_beams,))
+
+            tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.device)  # <s>
+            while tgt.shape[1] < self.config.max_len:
+                out = self.decoder(tgt, memory) # (seq, batch, n_vocab)
+                out = out.transpose(0,1)[:, -1, :]
+
+                next_token_scores = torch.nn.functional.log_softmax(out, dim=-1)
+                next_token_scores = next_token_scores + beam_scores[:, None].expand_as(next_token_scores)
+                next_token_scores = next_token_scores.view(batch_size, num_beams * vocab_size)
+
+                next_token_scores, next_tokens = torch.topk(next_token_scores, 2*num_beams, dim=1, largest=True, sorted=True)
+                next_indices = next_tokens // vocab_size
+                next_tokens = next_tokens % vocab_size
+
+                beam_outputs = beam_scorer.process(tgt, next_token_scores, next_tokens, next_indices, pad_token_id=3, eos_token_id=2)
+                beam_scores = beam_outputs["next_beam_scores"]
+                beam_next_tokens = beam_outputs["next_beam_tokens"]
+                beam_idx = beam_outputs["next_beam_indices"]
+
+                tgt = torch.cat((tgt[beam_idx, :], beam_next_tokens.unsqueeze(-1)), dim=-1)
+
+                if beam_scorer.is_done:
+                    break
+            decoded = beam_scorer.finalize(tgt, beam_scores, next_tokens, next_indices, pad_token_id=3, eos_token_id=2)
+        return self.sp.decode(decoded.cpu().tolist())
 
     def reconstract(self, sentence):
         memory = self.encode(sentence)
