@@ -29,7 +29,7 @@ if __name__ == '__main__':
     # エンコーダデコーダのパラメータ
     parser.add_argument("--vae_checkpoint")
     
-    parser.add_argument("--database")
+    parser.add_argument("--database", nargs='*')
 
     parser.add_argument("--telegram", action="store_true")
 
@@ -77,7 +77,12 @@ if __name__ == '__main__':
 
     Thread(target=agent.learn, daemon=True).start()
 
-    system = ChatSystem(database, agent, args.sample_size)
+    system = ChatSystem(
+            database,
+            agent,
+            args.sample_size,
+            output_file=str(Path(args.output_dir)/"chat_database.json")
+            )
     
     if args.telegram:
         bot = TelegramBot(system, args.setting_file)

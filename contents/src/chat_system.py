@@ -1,7 +1,7 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 class ChatSystem:
-    def __init__(self, database, agent, sample_size=256):
+    def __init__(self, database, agent, sample_size=256, output_file="chat_database.json"):
         # keyboard = [InlineKeyboardButton(" 0 ", callback_data='0'),
         #         InlineKeyboardButton(" 1 ", callback_data='1'),
         #         InlineKeyboardButton(" 2 ", callback_data='2')]
@@ -13,6 +13,8 @@ class ChatSystem:
         self.dialog_count = 0
 
         self.sample_size = sample_size
+
+        self.database_output_file = output_file
 
     def initial_message(self, input_dict):
         self.states[input_dict["sessionId"]] = {"inprogress":True, "hidden":self.agent.initial_hidden(), "memory":[]}
@@ -27,6 +29,7 @@ class ChatSystem:
         session_state = self.states[input_dict["sessionId"]]
 
         self.database.push(session_state["memory"])
+        self.database.save_added_memory(self.database_output_file)
         session_state["inprogress"] = False
 
         output_dict = {'utt': '[end] 対話を終了しました', 'markup': None}
