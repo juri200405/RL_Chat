@@ -35,23 +35,38 @@ def make_dialog_database(input_dir, output_file):
     for filename in Path(input_dir).glob("**/*.json"):
         if 'en' not in filename.parts:
             print(filename)
-            dialog = []
             with open(filename, 'rt', encoding='utf-8') as f:
                 data = json.loads(f.read())
 
-            utt_pair = dict()
+            dialog1 = []
+            dialog2 = []
+            utt_pair1 = dict()
+            utt_pair2 = dict()
             for i, item in enumerate(data["turns"]):
-                if item["speaker"] == "S" and i == 0:
-                    continue
-                elif item["speaker"] == "S":
-                    utt_pair["sys_utt"] = normalize_string(item["utterance"])
-                elif item["speaker"] == "U":
-                    utt_pair["usr_utt"] = normalize_string(item["utterance"])
+                if i == 0:
+                    if item["speaker"] == "S":
+                        utt_pair2["usr_utt"] = normalize_string(item["utterance"])
+                    elif item["speaker"] == "U":
+                        utt_pair1["usr_utt"] = normalize_string(item["utterance"])
 
-                if "sys_utt" in utt_pair and "usr_utt" in  utt_pair:
-                    dialog.append(utt_pair)
-                    utt_pair = dict()
-            utterances.append(dialog)
+                    continue
+
+                if item["speaker"] == "S":
+                    utt_pair1["sys_utt"] = normalize_string(item["utterance"])
+                    utt_pair2["usr_utt"] = normalize_string(item["utterance"])
+                elif item["speaker"] == "U":
+                    utt_pair1["usr_utt"] = normalize_string(item["utterance"])
+                    utt_pair2["sys_utt"] = normalize_string(item["utterance"])
+
+                if "sys_utt" in utt_pair1 and "usr_utt" in utt_pair1:
+                    dialog1.append(utt_pair1)
+                    utt_pair1 = dict()
+                if "sys_utt" in utt_pair2 and "usr_utt" in utt_pair2:
+                    dialog2.append(utt_pair2)
+                    utt_pair2 = dict()
+
+            utterances.append(dialog1)
+            utterances.append(dialog2)
 
     with open(output_file, 'wt', encoding='utf-8') as f:
         json.dump(utterances, f)
