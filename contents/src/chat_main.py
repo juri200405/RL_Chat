@@ -35,6 +35,7 @@ if __name__ == '__main__':
 
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--sample_size", type=int, default=128)
+    parser.add_argument("--num_beams", type=int, default=5)
 
     parser.add_argument("--obs_size", type=int, default=1024)
     
@@ -62,14 +63,15 @@ if __name__ == '__main__':
             sp,
             encoder,
             decoder,
-            encoder_device=torch.device("cuda", 2),
-            decoder_device=torch.device("cuda", 2),
-            learning_agent_device=torch.device("cuda", 3),
-            chat_agent_device=torch.device("cuda", 3),
+            encoder_device=torch.device("cuda", 0),
+            decoder_device=torch.device("cuda", 0),
+            learning_agent_device=torch.device("cuda", 0),
+            chat_agent_device=torch.device("cuda", 0),
             batch_size=args.batch_size,
             n_latent=config.n_latent,
             max_len=config.max_len,
             obs_size=args.obs_size,
+            num_beams=args.num_beams,
             writer=writer
             )
 

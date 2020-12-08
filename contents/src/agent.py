@@ -8,9 +8,8 @@ from torch.nn import functional as F
 from torch.distributions import MultivariateNormal
 import torch.optim as optim
 
-import torch_optimizer
-
 import sentencepiece as spm
+import transformers
 
 import encoder_decoder
 from dataloader import get_dataloader
@@ -73,6 +72,8 @@ class Agent:
         self.target_qf2 = Q_network(obs_size=obs_size, action_size=n_latent)
         self.log_alpha = torch.tensor([0.1], requires_grad=True, device=device)
 
+        self.qf_criterion = nn.MSELoss()
+
         self.target_entropy = -1024
         self.discount = 0.99
         self.tau = 5e-3
@@ -133,25 +134,28 @@ class Agent:
         is_final = is_final.to(self.device)
 
         obs, _ = self.gru(state, hidden)
+        obs_policy = obs.detach().requires_grad_()
         obs_q1 = obs.detach().requires_grad_()
         obs_q2 = obs.detach().requires_grad_()
-        obs_policy = obs.detach().requires_grad_()
 
+        new_obs_action, _, log_prob = self.policy.sample(obs_policy)
+        log_prob = log_prob.unsqueeze(-1)
         q1 = self.qf1(action, obs_q1)
         q2 = self.qf2(action, obs_q2)
-        _, _, log_prob = self.policy.get_log_prob(obs_policy, action)
+
         with torch.no_grad():
-            min_q = torch.min(q1, q2)
+            min_q = torch.min(self.qf1(new_obs_action, obs), self.qf2(new_obs_action, obs))
             next_obs, _ = self.gru(next_state, next_hidden)
             next_action, _, next_log_prob = self.policy.sample(next_obs)
-            target_q = torch.min(self.target_qf1(next_action, next_obs), self.target_qf2(next_action, next_obs))
+            next_log_prob = next_log_prob.unsqueeze(-1)
             alpha = torch.exp(self.log_alpha)
-            q_loss_scale = min_q - (reward + (1 - is_final) * self.discount * (target_q - alpha * next_log_prob)).detach()
+            target_q = torch.min(self.target_qf1(next_action, next_obs), self.target_qf2(next_action, next_obs)) - alpha*next_log_prob
+            q_target = (reward + (1 - is_final) * self.discount * target_q).detach()
 
         alpha_loss = -(self.log_alpha * (log_prob + self.target_entropy).detach()).mean()
-        policy_loss = (alpha * log_prob - min_q).mean()
-        qf1_loss = (q1 * q_loss_scale).mean()
-        qf2_loss = (q2 * q_loss_scale).mean()
+        policy_loss = (alpha * log_prob - min_q.detach()).mean()
+        qf1_loss = self.qf_criterion(q1, q_target)
+        qf2_loss = self.qf_criterion(q2, q_target)
 
         # 各パラメータの更新
         self.gru_opt.zero_grad()
@@ -179,7 +183,6 @@ class Agent:
             t_p.data.copy_(t_p.data * (1.0-self.tau) + p.data * self.tau)
 
         if self.writer is not None:
-            print("writer update")
             self.writer.add_scalar("alpha_loss", alpha_loss.item(), i)
             self.writer.add_scalar("policy_loss", policy_loss.item(), i)
             self.writer.add_scalar("qf1_loss", qf1_loss.item(), i)
@@ -212,6 +215,7 @@ class Chat_Module:
             n_latent=1024,
             max_len=128,
             obs_size=1024,
+            num_beams=5,
             writer=None
             ):
         self.sp = spm_model
@@ -232,6 +236,7 @@ class Chat_Module:
         self.batch_size = batch_size
         self.max_len = max_len
         self.obs_size = obs_size
+        self.num_beams=num_beams
 
     def make_utt(self, usr_utt, hidden):
         self.chat_agent.eval()
@@ -256,10 +261,17 @@ class Chat_Module:
         return state.unsqueeze(0)
 
     def decode(self, memory):
+        if self.num_beams < 2:
+            return self.greedy_decode(memory)
+        else:
+            return self.beam_decode(memory)
+
+    def greedy_decode(self, memory):
         with torch.no_grad():
             tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.decoder_device)  # <s>
             unfinish = torch.ones(memory.shape[0], 1, dtype=torch.long, device=self.decoder_device)
-            while tgt.shape[1] <= self.max_len:
+            memory = memory.to(self.decoder_device)
+            while tgt.shape[1] < self.max_len:
                 out = self.decoder(tgt, memory)
                 _, topi = out.transpose(0,1).topk(1)
                 next_word = topi[:,-1]
@@ -269,6 +281,46 @@ class Chat_Module:
                 if unfinish.max() == 0: # </s>
                     break
         return self.sp.decode(tgt.cpu().tolist())
+
+    def beam_decode(self, memory):
+        num_beams = self.num_beams
+        batch_size = memory.shape[0]
+        vocab_size = len(self.sp)
+        beam_scorer = transformers.BeamSearchScorer(batch_size=batch_size, max_length=self.max_len, num_beams=num_beams, device=self.decoder_device)
+        with torch.no_grad():
+            memory_list = torch.split(memory, 1)
+            memory_list = [torch.cat([item]*num_beams) for item in memory_list]
+            memory = torch.cat(memory_list)
+            memory = memory.to(self.decoder_device)
+
+            beam_scores = torch.zeros((batch_size, num_beams), dtype=torch.float, device=self.decoder_device)
+            beam_scores[:,1:] = -1e9
+            beam_scores = beam_scores.view((batch_size * num_beams,))
+
+            tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.decoder_device)  # <s>
+            while tgt.shape[1] < self.max_len:
+                out = self.decoder(tgt, memory) # (seq, batch, n_vocab)
+                out = out.transpose(0,1)[:, -1, :]
+
+                next_token_scores = torch.nn.functional.log_softmax(out, dim=-1)
+                next_token_scores = next_token_scores + beam_scores[:, None].expand_as(next_token_scores)
+                next_token_scores = next_token_scores.view(batch_size, num_beams * vocab_size)
+
+                next_token_scores, next_tokens = torch.topk(next_token_scores, 2*num_beams, dim=1, largest=True, sorted=True)
+                next_indices = next_tokens // vocab_size
+                next_tokens = next_tokens % vocab_size
+
+                beam_outputs = beam_scorer.process(tgt, next_token_scores, next_tokens, next_indices, pad_token_id=3, eos_token_id=2)
+                beam_scores = beam_outputs["next_beam_scores"]
+                beam_next_tokens = beam_outputs["next_beam_tokens"]
+                beam_idx = beam_outputs["next_beam_indices"]
+
+                tgt = torch.cat((tgt[beam_idx, :], beam_next_tokens.unsqueeze(-1)), dim=-1)
+
+                if beam_scorer.is_done:
+                    break
+            decoded = beam_scorer.finalize(tgt, beam_scores, next_tokens, next_indices, pad_token_id=3, eos_token_id=2)
+        return self.sp.decode(decoded.cpu().tolist())
 
     def update_param(self, sample):
         self.sample_queue.put(sample)
