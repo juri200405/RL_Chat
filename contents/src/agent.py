@@ -246,7 +246,7 @@ class Chat_Module:
             action, _, _ = self.chat_agent.policy.sample(obs)
 
             sys_utt = self.decode(action.to(self.decoder_device))
-        return sys_utt, next_hidden
+        return sys_utt[0], next_hidden
 
     def initial_hidden(self):
         return torch.zeros(1,1,self.obs_size)
@@ -382,7 +382,6 @@ class Chat_Module:
         learn_num = 0
         while True:
             sample = self.sample_queue.get()
-            print("learning")
             self.learning_agent.train()
 
             itr = get_dataloader(self.make_batch(sample), self.batch_size)

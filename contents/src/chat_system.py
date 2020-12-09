@@ -1,4 +1,13 @@
+import unicodedata
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+def normalize_string(s):
+    '''
+    文s中に含まれる文字を正規化。
+    '''
+    s = ''.join(c for c in unicodedata.normalize('NFKC', s) if unicodedata.category(c) != 'Mn')
+    return s
 
 class ChatSystem:
     def __init__(self, database, agent, sample_size=256, output_file="chat_database.json"):
@@ -45,10 +54,10 @@ class ChatSystem:
         if input_dict["sessionId"] in self.states:
             session_state = self.states[input_dict["sessionId"]]
             if session_state["inprogress"]:
-                utt, hidden = self.agent.make_utt(input_dict["utt"], session_state["hidden"])
-                utt = utt[0]
+                usr_utt = normalize_string(input_dict["utt"])
+                utt, hidden = self.agent.make_utt(usr_utt, session_state["hidden"])
                 session_state["hidden"] = hidden
-                session_state["memory"].append({"usr_utt":input_dict["utt"], "sys_utt":utt})
+                session_state["memory"].append({"usr_utt":usr_utt, "sys_utt":utt})
                 # output_dict = {'utt':utt, 'markup': self.reply_markup}
                 utt = "sys: " + utt
                 output_dict = {'utt':utt, 'markup': None}
