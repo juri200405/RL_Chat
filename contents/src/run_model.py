@@ -70,7 +70,7 @@ class Trainer:
             exit()
 
         if args.pt_file is not None:
-            checkpoint = torch.load(args.pt_file)
+            checkpoint = torch.load(args.pt_file, map_location=self.config.device)
             self.encoder.load_state_dict(checkpoint["encoder_state_dict"])
             self.decoder.load_state_dict(checkpoint["decoder_state_dict"])
             self.encoder_opt.load_state_dict(checkpoint["encoder_opt_state_dict"])
