@@ -85,7 +85,8 @@ def make_dbdc_data(input_dir):
                 utterances.append(normalize_string(item["utterance"]))
                 if item["speaker"] == "S":
                     score = np.mean([score_dict[anno_item["breakdown"]] for anno_item in item["annotations"]])
-                    datas.append({"utterances":utterances.copy(), "score":score})
+                    grammar = np.mean([score_dict[anno_item["ungrammatical-sentence"]] for anno_item in item["annotations"]])
+                    datas.append({"utterances":utterances.copy(), "score":score, "grammar":grammar})
     return datas
 
 
