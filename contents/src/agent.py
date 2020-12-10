@@ -8,9 +8,8 @@ from torch.nn import functional as F
 from torch.distributions import MultivariateNormal
 import torch.optim as optim
 
-import torch_optimizer
-
 import sentencepiece as spm
+import transformers
 
 import encoder_decoder
 from dataloader import get_dataloader
@@ -62,16 +61,18 @@ class Policy_network(nn.Module):
         return action, mean, log_prob
 
 class Agent:
-    def __init__(self, device, writer):
+    def __init__(self, n_latent, obs_size, device, writer):
         self.device = device
 
-        self.gru = nn.GRU(input_size=1024, hidden_size=1024)
-        self.policy = Policy_network()
-        self.qf1 = Q_network()
-        self.qf2 = Q_network()
-        self.target_qf1 = Q_network()
-        self.target_qf2 = Q_network()
+        self.gru = nn.GRU(input_size=n_latent, hidden_size=obs_size)
+        self.policy = Policy_network(obs_size=obs_size, output_size=n_latent)
+        self.qf1 = Q_network(obs_size=obs_size, action_size=n_latent)
+        self.qf2 = Q_network(obs_size=obs_size, action_size=n_latent)
+        self.target_qf1 = Q_network(obs_size=obs_size, action_size=n_latent)
+        self.target_qf2 = Q_network(obs_size=obs_size, action_size=n_latent)
         self.log_alpha = torch.tensor([0.1], requires_grad=True, device=device)
+
+        self.qf_criterion = nn.MSELoss()
 
         self.target_entropy = -1024
         self.discount = 0.99
@@ -133,25 +134,28 @@ class Agent:
         is_final = is_final.to(self.device)
 
         obs, _ = self.gru(state, hidden)
+        obs_policy = obs.detach().requires_grad_()
         obs_q1 = obs.detach().requires_grad_()
         obs_q2 = obs.detach().requires_grad_()
-        obs_policy = obs.detach().requires_grad_()
 
+        new_obs_action, _, log_prob = self.policy.sample(obs_policy)
+        log_prob = log_prob.unsqueeze(-1)
         q1 = self.qf1(action, obs_q1)
         q2 = self.qf2(action, obs_q2)
-        _, _, log_prob = self.policy.get_log_prob(obs_policy, action)
+
         with torch.no_grad():
-            min_q = torch.min(q1, q2)
+            min_q = torch.min(self.qf1(new_obs_action, obs), self.qf2(new_obs_action, obs))
             next_obs, _ = self.gru(next_state, next_hidden)
             next_action, _, next_log_prob = self.policy.sample(next_obs)
-            target_q = torch.min(self.target_qf1(next_action, next_obs), self.target_qf2(next_action, next_obs))
+            next_log_prob = next_log_prob.unsqueeze(-1)
             alpha = torch.exp(self.log_alpha)
-            q_loss_scale = min_q - (reward + (1 - is_final) * self.discount * (target_q - alpha * next_log_prob)).detach()
+            target_q = torch.min(self.target_qf1(next_action, next_obs), self.target_qf2(next_action, next_obs)) - alpha*next_log_prob
+            q_target = (reward + (1 - is_final) * self.discount * target_q).detach()
 
         alpha_loss = -(self.log_alpha * (log_prob + self.target_entropy).detach()).mean()
-        policy_loss = (alpha * log_prob - min_q).mean()
-        qf1_loss = (q1 * q_loss_scale).mean()
-        qf2_loss = (q2 * q_loss_scale).mean()
+        policy_loss = (alpha * log_prob - min_q.detach()).mean()
+        qf1_loss = self.qf_criterion(q1, q_target)
+        qf2_loss = self.qf_criterion(q2, q_target)
 
         # 各パラメータの更新
         self.gru_opt.zero_grad()
@@ -179,7 +183,6 @@ class Agent:
             t_p.data.copy_(t_p.data * (1.0-self.tau) + p.data * self.tau)
 
         if self.writer is not None:
-            print("writer update")
             self.writer.add_scalar("alpha_loss", alpha_loss.item(), i)
             self.writer.add_scalar("policy_loss", policy_loss.item(), i)
             self.writer.add_scalar("qf1_loss", qf1_loss.item(), i)
@@ -199,57 +202,125 @@ class Agent:
 
 
 class Chat_Module:
-    def __init__(self, spm_model, encoder, decoder, encoder_device="cpu", decoder_device="cpu", learning_agent_device="cpu", chat_agent_device="cpu", batch_size=64, writer=None):
+    def __init__(
+            self,
+            spm_model,
+            encoder,
+            decoder,
+            encoder_device="cpu",
+            decoder_device="cpu",
+            learning_agent_device="cpu",
+            chat_agent_device="cpu",
+            batch_size=64,
+            n_latent=1024,
+            max_len=128,
+            obs_size=1024,
+            num_beams=5,
+            writer=None
+            ):
         self.sp = spm_model
 
-        # encoderのBERT内に組み込まれている BertEmbeddings をdecoderで使うため、GPUに送る順番は decoder->encoder
-        self.decoder = decoder.to(decoder_device)
         self.encoder = encoder.to(encoder_device)
+        self.decoder = decoder.to(decoder_device)
         self.decoder.eval()
         self.encoder.eval()
 
         self.encoder_device = encoder_device
         self.decoder_device = decoder_device
 
-        self.learning_agent = Agent(learning_agent_device, writer=writer)
-        self.chat_agent = Agent(chat_agent_device, writer=writer)
+        self.learning_agent = Agent(n_latent, obs_size, learning_agent_device, writer=writer)
+        self.chat_agent = Agent(n_latent, obs_size, chat_agent_device, writer=writer)
         self.last_param = self.learning_agent.state_dict() 
 
         self.sample_queue = Queue()
         self.batch_size = batch_size
+        self.max_len = max_len
+        self.obs_size = obs_size
+        self.num_beams=num_beams
 
     def make_utt(self, usr_utt, hidden):
         self.chat_agent.eval()
         with torch.no_grad():
-            state = self.encode(usr_utt) # state = (1, batch(1), 1024)
-            obs, next_hidden = self.chat_agent.gru(state.to(self.chat_agent.device), hidden.to(self.chat_agent.device)) # obs = (1, batch(1), 1024), hidden = (1, batch(1), 1024)
+            state = self.encode(usr_utt) # state = (1, batch(1), n_latent)
+            obs, next_hidden = self.chat_agent.gru(state.to(self.chat_agent.device), hidden.to(self.chat_agent.device)) # obs = (1, batch(1), n_latent), hidden = (1, batch(1), 1024)
             action, _, _ = self.chat_agent.policy.sample(obs)
 
-            sys_utt = self.decode(action.to(self.decoder_device), 256)
-        return sys_utt, next_hidden
+            sys_utt = self.decode(action.to(self.decoder_device))
+        return sys_utt[0], next_hidden
 
     def initial_hidden(self):
-        return torch.zeros(1,1,1024)
+        return torch.zeros(1,1,self.obs_size)
 
-    def decode(self, memory, max_length):
+    def encode(self, utt):
         with torch.no_grad():
-            tgt = torch.full((1, max_length), 0, dtype=torch.long, device=self.encoder_device)
-            tgt_key_padding_mask = torch.full((1, max_length), True, dtype=torch.bool, device=self.decoder_device)
-            t_word = 1 # <s>
-            ids = []
-            for t in range(max_length):
-                tgt[0][t] = t_word
-                tgt_key_padding_mask[0][t] = False
-                out = self.decoder(tgt, memory, tgt_padding_mask=tgt_key_padding_mask)
-                _, topi = out.topk(1)
-                next_word = topi[t].item()
-                ids.append(next_word)
-                if next_word == 2: # </s>
+            input_s = torch.tensor([1] + self.sp.encode(utt) + [2], dtype=torch.long, device=self.encoder_device).unsqueeze(0)
+            inp_mask = torch.tensor([[False]*input_s.shape[1] + [True]*(self.max_len - input_s.shape[1])], device=self.encoder_device)
+            pad = torch.full((1, self.max_len - input_s.shape[1]), 3, dtype=torch.long, device=self.encoder_device)
+            input_s = torch.cat((input_s, pad), dim=1)
+            state = self.encoder(input_s, attention_mask=inp_mask) # state = (batch(1), n_latent)
+        return state.unsqueeze(0)
+
+    def decode(self, memory):
+        if self.num_beams < 2:
+            return self.greedy_decode(memory)
+        else:
+            return self.beam_decode(memory)
+
+    def greedy_decode(self, memory):
+        with torch.no_grad():
+            tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.decoder_device)  # <s>
+            unfinish = torch.ones(memory.shape[0], 1, dtype=torch.long, device=self.decoder_device)
+            memory = memory.to(self.decoder_device)
+            while tgt.shape[1] < self.max_len:
+                out = self.decoder(tgt, memory)
+                _, topi = out.transpose(0,1).topk(1)
+                next_word = topi[:,-1]
+                next_word = next_word*unfinish + (3)*(1-unfinish)
+                tgt = torch.cat((tgt, next_word), dim=-1)
+                unfinish = unfinish * (~(next_word == 2)).long()
+                if unfinish.max() == 0: # </s>
                     break
-                else:
-                    t_word = next_word
-            print(ids)
-        return self.sp.decode(ids)
+        return self.sp.decode(tgt.cpu().tolist())
+
+    def beam_decode(self, memory):
+        num_beams = self.num_beams
+        batch_size = memory.shape[0]
+        vocab_size = len(self.sp)
+        beam_scorer = transformers.BeamSearchScorer(batch_size=batch_size, max_length=self.max_len, num_beams=num_beams, device=self.decoder_device)
+        with torch.no_grad():
+            memory_list = torch.split(memory, 1)
+            memory_list = [torch.cat([item]*num_beams) for item in memory_list]
+            memory = torch.cat(memory_list)
+            memory = memory.to(self.decoder_device)
+
+            beam_scores = torch.zeros((batch_size, num_beams), dtype=torch.float, device=self.decoder_device)
+            beam_scores[:,1:] = -1e9
+            beam_scores = beam_scores.view((batch_size * num_beams,))
+
+            tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.decoder_device)  # <s>
+            while tgt.shape[1] < self.max_len:
+                out = self.decoder(tgt, memory) # (seq, batch, n_vocab)
+                out = out.transpose(0,1)[:, -1, :]
+
+                next_token_scores = torch.nn.functional.log_softmax(out, dim=-1)
+                next_token_scores = next_token_scores + beam_scores[:, None].expand_as(next_token_scores)
+                next_token_scores = next_token_scores.view(batch_size, num_beams * vocab_size)
+
+                next_token_scores, next_tokens = torch.topk(next_token_scores, 2*num_beams, dim=1, largest=True, sorted=True)
+                next_indices = next_tokens // vocab_size
+                next_tokens = next_tokens % vocab_size
+
+                beam_outputs = beam_scorer.process(tgt, next_token_scores, next_tokens, next_indices, pad_token_id=3, eos_token_id=2)
+                beam_scores = beam_outputs["next_beam_scores"]
+                beam_next_tokens = beam_outputs["next_beam_tokens"]
+                beam_idx = beam_outputs["next_beam_indices"]
+
+                tgt = torch.cat((tgt[beam_idx, :], beam_next_tokens.unsqueeze(-1)), dim=-1)
+
+                if beam_scorer.is_done:
+                    break
+            decoded = beam_scorer.finalize(tgt, beam_scores, next_tokens, next_indices, pad_token_id=3, eos_token_id=2)
+        return self.sp.decode(decoded.cpu().tolist())
 
     def update_param(self, sample):
         self.sample_queue.put(sample)
@@ -257,12 +328,6 @@ class Chat_Module:
 
     def update_param_from_file(self, path):
         pass
-
-    def encode(self, utt):
-        with torch.no_grad():
-            input_tensor = torch.LongTensor([1] + self.sp.encode(utt) + [2]).unsqueeze(0).to(self.encoder_device)
-            state = self.encoder(input_tensor) # state = (1, batch(1), 1024)
-        return state
 
     def make_batch(self, sample):
         memory = []
@@ -317,7 +382,6 @@ class Chat_Module:
         learn_num = 0
         while True:
             sample = self.sample_queue.get()
-            print("learning")
             self.learning_agent.train()
 
             itr = get_dataloader(self.make_batch(sample), self.batch_size)

@@ -2,6 +2,7 @@ import argparse
 from threading import Thread
 import json
 import re
+from pathlib import Path
 
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 
@@ -15,6 +16,7 @@ import encoder_decoder
 from agent import Chat_Module
 from database import Database
 from chat_system import ChatSystem
+from config import Config
 
 from my_telegram_bot import TelegramBot
 
@@ -23,38 +25,32 @@ if __name__ == '__main__':
     parser.add_argument("-s", "--setting_file", required=True)
     parser.add_argument("-m", "--spm_model", required=True)
     parser.add_argument("-o", "--output_dir", required=True)
-    # ハイパーパラメータ
-    parser.add_argument("-p", "--hyper_param", required=True)
 
     # エンコーダデコーダのパラメータ
-    parser.add_argument("--pt_file")
+    parser.add_argument("--vae_checkpoint")
     
-    # BERTのpre-trainモデルへのパス
-    parser.add_argument("--bert_path")
-
-    parser.add_argument("--database")
+    parser.add_argument("--database", nargs='*')
 
     parser.add_argument("--telegram", action="store_true")
+
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--sample_size", type=int, default=128)
+    parser.add_argument("--num_beams", type=int, default=5)
+
+    parser.add_argument("--obs_size", type=int, default=1024)
     
     args = parser.parse_args()
 
-    with open(args.hyper_param, 'rt') as f:
-        hyperp = json.load(f)
+    hyper_param = Path(args.vae_checkpoint).with_name("hyper_param.json")
+    config = Config()
+    config.load_json(hyper_param)
 
-    encoder = encoder_decoder.Bert_Encoder_gru(args.bert_path)
-    decoder = encoder_decoder.transformer_Decoder(
-            hyperp["n_vocab"],
-            hyperp["d_model"],
-            hyperp["n_head"],
-            hyperp["n_hidden"],
-            hyperp["decoder_nlayers"],
-            encoder.bert.get_input_embeddings(),
-            nn.LayerNorm(hyperp["d_model"]),
-            dropout=hyperp["dropout"]
-            )
+    embedding = encoder_decoder.Transformer_Embedding(config)
+    encoder = encoder_decoder.transformer_Encoder(config, embedding, nn.LayerNorm(config.d_model))
+    decoder = encoder_decoder.transformer_Decoder(config, embedding, nn.LayerNorm(config.d_model))
 
-    if args.pt_file is not None:
-        checkpoint = torch.load(args.pt_file)
+    if args.vae_checkpoint is not None:
+        checkpoint = torch.load(args.vae_checkpoint, map_location="cpu")
         encoder.load_state_dict(checkpoint["encoder_state_dict"])
         decoder.load_state_dict(checkpoint["decoder_state_dict"])
 
@@ -69,15 +65,24 @@ if __name__ == '__main__':
             decoder,
             encoder_device=torch.device("cuda", 0),
             decoder_device=torch.device("cuda", 0),
-            learning_agent_device=torch.device("cuda", 1),
-            chat_agent_device=torch.device("cuda", 1),
-            batch_size=hyperp["batch_size"],
+            learning_agent_device=torch.device("cuda", 0),
+            chat_agent_device=torch.device("cuda", 0),
+            batch_size=args.batch_size,
+            n_latent=config.n_latent,
+            max_len=config.max_len,
+            obs_size=args.obs_size,
+            num_beams=args.num_beams,
             writer=writer
             )
 
     Thread(target=agent.learn, daemon=True).start()
 
-    system = ChatSystem(database, agent, hyperp["sample_size"])
+    system = ChatSystem(
+            database,
+            agent,
+            args.sample_size,
+            output_file=str(Path(args.output_dir)/"chat_database.json")
+            )
     
     if args.telegram:
         bot = TelegramBot(system, args.setting_file)
