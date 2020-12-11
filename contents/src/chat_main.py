@@ -44,6 +44,7 @@ if __name__ == '__main__':
     hyper_param = Path(args.vae_checkpoint).with_name("hyper_param.json")
     config = Config()
     config.load_json(hyper_param)
+    config.dropout = 0.0
 
     embedding = encoder_decoder.Transformer_Embedding(config)
     encoder = encoder_decoder.transformer_Encoder(config, embedding, nn.LayerNorm(config.d_model))
@@ -53,6 +54,9 @@ if __name__ == '__main__':
         checkpoint = torch.load(args.vae_checkpoint, map_location="cpu")
         encoder.load_state_dict(checkpoint["encoder_state_dict"])
         decoder.load_state_dict(checkpoint["decoder_state_dict"])
+
+    encoder.eval()
+    decoder.eval()
 
     sp = spm.SentencePieceProcessor(model_file=args.spm_model)
 

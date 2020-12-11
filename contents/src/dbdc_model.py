@@ -94,6 +94,7 @@ if __name__ == "__main__":
 
     config = Config()
     config.load_json(str(hyper_param))
+    config.dropout = 0.0
     device = torch.device("cuda:{}".format(args.gpu))
 
     sp = spm.SentencePieceProcessor(model_file=args.spm_model)
