@@ -89,6 +89,21 @@ def make_dbdc_data(input_dir):
                     datas.append({"utterances":utterances.copy(), "score":score, "grammar":grammar})
     return datas
 
+def make_grammar_data(input_dir):
+    score_dict = {"O":1.0, "X":0.0}
+    datas = []
+    for filename in Path(input_dir).glob("**/*.json"):
+        if 'en' not in filename.parts:
+            print(filename)
+            with open(filename, 'rt', encoding='utf-8') as f:
+                data = json.loads(f.read())
+
+            for item in data["turns"]:
+                if item["speaker"] == "S":
+                    grammar = np.mean([score_dict[anno_item["ungrammatical-sentence"]] for anno_item in item["annotations"]])
+                    datas.append({"utterance":normalize_string(item["utterance"]), "grammar":grammar})
+    return datas
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -105,5 +120,9 @@ if __name__ == "__main__":
         datas = make_dbdc_data(args.inputdir)
         with open(args.outputfile, 'wt', encoding='utf-8') as f:
             json.dump(datas, f)
+    elif args.file_type == "grammar":
+        datas = make_grammar_data(args.inputdir)
+        with open(args.outputfile, 'wt', encoding='utf-8') as f:
+            json.dump(datas, f, indent=2, ensure_ascii=False)
     else:
-        print('file_type should be ["utt_list","database","dbdc_data"]')
+        print('file_type should be ["utt_list","database","dbdc_data", "grammar"]')
