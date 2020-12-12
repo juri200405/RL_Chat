@@ -204,11 +204,6 @@ class Agent:
 class Chat_Module:
     def __init__(
             self,
-            spm_model,
-            encoder,
-            decoder,
-            encoder_device="cpu",
-            decoder_device="cpu",
             learning_agent_device="cpu",
             chat_agent_device="cpu",
             batch_size=64,
@@ -218,15 +213,6 @@ class Chat_Module:
             num_beams=5,
             writer=None
             ):
-        self.sp = spm_model
-
-        self.encoder = encoder.to(encoder_device)
-        self.decoder = decoder.to(decoder_device)
-        self.decoder.eval()
-        self.encoder.eval()
-
-        self.encoder_device = encoder_device
-        self.decoder_device = decoder_device
 
         self.learning_agent = Agent(n_latent, obs_size, learning_agent_device, writer=writer)
         self.chat_agent = Agent(n_latent, obs_size, chat_agent_device, writer=writer)
@@ -236,91 +222,17 @@ class Chat_Module:
         self.batch_size = batch_size
         self.max_len = max_len
         self.obs_size = obs_size
-        self.num_beams=num_beams
 
-    def make_utt(self, usr_utt, hidden):
+    def act(self, state, hidden):
         self.chat_agent.eval()
         with torch.no_grad():
-            state = self.encode(usr_utt) # state = (1, batch(1), n_latent)
             obs, next_hidden = self.chat_agent.gru(state.to(self.chat_agent.device), hidden.to(self.chat_agent.device)) # obs = (1, batch(1), n_latent), hidden = (1, batch(1), 1024)
             action, _, _ = self.chat_agent.policy.sample(obs)
 
-            sys_utt = self.decode(action.to(self.decoder_device))
-        return sys_utt[0], next_hidden
+        return action.cpu(), next_hidden.cpu()
 
     def initial_hidden(self):
         return torch.zeros(1,1,self.obs_size)
-
-    def encode(self, utt):
-        with torch.no_grad():
-            input_s = torch.tensor([1] + self.sp.encode(utt) + [2], dtype=torch.long, device=self.encoder_device).unsqueeze(0)
-            inp_mask = torch.tensor([[False]*input_s.shape[1] + [True]*(self.max_len - input_s.shape[1])], device=self.encoder_device)
-            pad = torch.full((1, self.max_len - input_s.shape[1]), 3, dtype=torch.long, device=self.encoder_device)
-            input_s = torch.cat((input_s, pad), dim=1)
-            state = self.encoder(input_s, attention_mask=inp_mask) # state = (batch(1), n_latent)
-        return state.unsqueeze(0)
-
-    def decode(self, memory):
-        if self.num_beams < 2:
-            return self.greedy_decode(memory)
-        else:
-            return self.beam_decode(memory)
-
-    def greedy_decode(self, memory):
-        with torch.no_grad():
-            tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.decoder_device)  # <s>
-            unfinish = torch.ones(memory.shape[0], 1, dtype=torch.long, device=self.decoder_device)
-            memory = memory.to(self.decoder_device)
-            while tgt.shape[1] < self.max_len:
-                out = self.decoder(tgt, memory)
-                _, topi = out.transpose(0,1).topk(1)
-                next_word = topi[:,-1]
-                next_word = next_word*unfinish + (3)*(1-unfinish)
-                tgt = torch.cat((tgt, next_word), dim=-1)
-                unfinish = unfinish * (~(next_word == 2)).long()
-                if unfinish.max() == 0: # </s>
-                    break
-        return self.sp.decode(tgt.cpu().tolist())
-
-    def beam_decode(self, memory):
-        num_beams = self.num_beams
-        batch_size = memory.shape[0]
-        vocab_size = len(self.sp)
-        beam_scorer = transformers.BeamSearchScorer(batch_size=batch_size, max_length=self.max_len, num_beams=num_beams, device=self.decoder_device)
-        with torch.no_grad():
-            memory_list = torch.split(memory, 1)
-            memory_list = [torch.cat([item]*num_beams) for item in memory_list]
-            memory = torch.cat(memory_list)
-            memory = memory.to(self.decoder_device)
-
-            beam_scores = torch.zeros((batch_size, num_beams), dtype=torch.float, device=self.decoder_device)
-            beam_scores[:,1:] = -1e9
-            beam_scores = beam_scores.view((batch_size * num_beams,))
-
-            tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.decoder_device)  # <s>
-            while tgt.shape[1] < self.max_len:
-                out = self.decoder(tgt, memory) # (seq, batch, n_vocab)
-                out = out.transpose(0,1)[:, -1, :]
-
-                next_token_scores = torch.nn.functional.log_softmax(out, dim=-1)
-                next_token_scores = next_token_scores + beam_scores[:, None].expand_as(next_token_scores)
-                next_token_scores = next_token_scores.view(batch_size, num_beams * vocab_size)
-
-                next_token_scores, next_tokens = torch.topk(next_token_scores, 2*num_beams, dim=1, largest=True, sorted=True)
-                next_indices = next_tokens // vocab_size
-                next_tokens = next_tokens % vocab_size
-
-                beam_outputs = beam_scorer.process(tgt, next_token_scores, next_tokens, next_indices, pad_token_id=3, eos_token_id=2)
-                beam_scores = beam_outputs["next_beam_scores"]
-                beam_next_tokens = beam_outputs["next_beam_tokens"]
-                beam_idx = beam_outputs["next_beam_indices"]
-
-                tgt = torch.cat((tgt[beam_idx, :], beam_next_tokens.unsqueeze(-1)), dim=-1)
-
-                if beam_scorer.is_done:
-                    break
-            decoded = beam_scorer.finalize(tgt, beam_scores, next_tokens, next_indices, pad_token_id=3, eos_token_id=2)
-        return self.sp.decode(decoded.cpu().tolist())
 
     def update_param(self, sample):
         self.sample_queue.put(sample)
@@ -332,50 +244,31 @@ class Chat_Module:
     def make_batch(self, sample):
         memory = []
         for dialog in sample:
-            usr = None
-            sys = None
-            hidden = self.initial_hidden()
-            for item in dialog:
-                next_usr = item["usr_utt"]
-                next_sys = item["sys_utt"]
-                if usr is not None:
-                    state = self.encode(usr)
-                    with torch.no_grad():
-                        _, next_hidden = self.learning_agent.gru(state.to(self.learning_agent.device), hidden.to(self.learning_agent.device))
-                    action = self.encode(sys)
-                    reward = torch.tensor([[1]])
+            for i in range(len(dialog)):
+                state = dialog[i]["state"]
+                hidden = dialog[i]["hidden"]
+                action = dialog[i]["action"]
+                score = dialog[i]["score"]
+                reward = torch.tensor([[score]])
+                if i+1 < len(dialog):
+                    next_state = dialog[i+1]["state"]
+                    next_hidden = dialog[i+1]["hidden"]
                     is_final = torch.tensor([[0]])
-                    next_state = self.encode(next_usr)
-                    memory.append(
-                            dict(
-                                state=state.cpu(),
-                                hidden=hidden.cpu(),
-                                action=action.cpu(),
-                                reward=reward.cpu(),
-                                next_state=next_state.cpu(),
-                                next_hidden=next_hidden.cpu(),
-                                is_final=is_final.cpu()
-                                )
+                else:
+                    next_state = torch.zeros_like(state)
+                    next_hidden = torch.zeros_like(hidden)
+                    is_final = torch.tensor([[1]])
+                memory.append(
+                        dict(
+                            state=state.cpu(),
+                            hidden=hidden.cpu(),
+                            action=action.cpu(),
+                            reward=reward.cpu(),
+                            next_state=next_state.cpu(),
+                            next_hidden=next_hidden.cpu(),
+                            is_final=is_final.cpu()
                             )
-                    hidden = next_hidden
-                usr = next_usr
-                sys = next_sys
-
-            state = self.encode(usr)
-            action = self.encode(sys)
-            reward = torch.tensor([[0]])
-            is_final = torch.tensor([[1]])
-            memory.append(
-                    dict(
-                        state=state.cpu(),
-                        hidden=hidden.cpu(),
-                        action=action.cpu(),
-                        reward=reward.cpu(),
-                        next_state=torch.zeros_like(state).cpu(),
-                        next_hidden=torch.zeros_like(hidden).cpu(),
-                        is_final=is_final.cpu()
                         )
-                    )
         return memory
 
     def learn(self):

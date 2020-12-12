@@ -36,7 +36,7 @@ class VAE_tester:
         self.decoder.eval()
 
     def encode(self, sentence):
-        data = self.sp.encode(sentence)
+        data = self.sp.encode(sentence)[:self.config.max_len-2]
         with torch.no_grad():
             input_s = torch.tensor([1] + data + [2]).unsqueeze(0)
             inp_mask = torch.tensor([[False]*input_s.shape[1] + [True]*(self.config.max_len - input_s.shape[1])])
@@ -50,7 +50,7 @@ class VAE_tester:
             tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.device)  # <s>
             unfinish = torch.ones(memory.shape[0], 1, dtype=torch.long, device=self.device)
             memory = memory.to(self.device)
-            while tgt.shape[1] < self.config.max_len:
+            while tgt.shape[1] < self.config.max_len-1:
                 out = self.decoder(tgt, memory)
                 _, topi = out.transpose(0,1).topk(1)
                 next_word = topi[:,-1]
@@ -76,7 +76,7 @@ class VAE_tester:
             beam_scores = beam_scores.view((batch_size * num_beams,))
 
             tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.device)  # <s>
-            while tgt.shape[1] < self.config.max_len:
+            while tgt.shape[1] < self.config.max_len-1:
                 out = self.decoder(tgt, memory) # (seq, batch, n_vocab)
                 out = out.transpose(0,1)[:, -1, :]
 

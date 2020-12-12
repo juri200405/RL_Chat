@@ -17,17 +17,16 @@ from agent import Chat_Module
 from database import Database
 from chat_system import ChatSystem
 from config import Config
+from dbdc_model import DBDC
 
 from my_telegram_bot import TelegramBot
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("-s", "--setting_file", required=True)
-    parser.add_argument("-m", "--spm_model", required=True)
     parser.add_argument("-o", "--output_dir", required=True)
 
-    # エンコーダデコーダのパラメータ
-    parser.add_argument("--vae_checkpoint")
+    parser.add_argument("--dbdc_checkpoint", required=True)
     
     parser.add_argument("--database", nargs='*')
 
@@ -41,7 +40,12 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
 
-    hyper_param = Path(args.vae_checkpoint).with_name("hyper_param.json")
+    with open(str(Path(args.dbdc_checkpoint).with_name("dbdc_model_param.json")), "rt", encoding="utf-8") as f:
+        dbdc_param = json.load(f)
+    spm_model = dbdc_param["spm_model"]
+    vae_checkpoint = dbdc_param["vae_checkpoint"]
+
+    hyper_param = Path(vae_checkpoint).with_name("hyper_param.json")
     config = Config()
     config.load_json(hyper_param)
     config.dropout = 0.0
@@ -50,27 +54,23 @@ if __name__ == '__main__':
     encoder = encoder_decoder.transformer_Encoder(config, embedding, nn.LayerNorm(config.d_model))
     decoder = encoder_decoder.transformer_Decoder(config, embedding, nn.LayerNorm(config.d_model))
 
-    if args.vae_checkpoint is not None:
-        checkpoint = torch.load(args.vae_checkpoint, map_location="cpu")
-        encoder.load_state_dict(checkpoint["encoder_state_dict"])
-        decoder.load_state_dict(checkpoint["decoder_state_dict"])
+    checkpoint = torch.load(vae_checkpoint, map_location="cpu")
+    encoder.load_state_dict(checkpoint["encoder_state_dict"])
+    decoder.load_state_dict(checkpoint["decoder_state_dict"])
 
-    encoder.eval()
-    decoder.eval()
+    dbdc = DBDC(config.n_latent, dbdc_param["gru_hidden"], dbdc_param["ff_hidden"])
+    checkpoint = torch.load(args.dbdc_checkpoint, map_location="cpu")
+    dbdc.load_state_dict(checkpoint["model_state_dict"])
 
-    sp = spm.SentencePieceProcessor(model_file=args.spm_model)
+    sp = spm.SentencePieceProcessor(model_file=spm_model)
 
     writer = SummaryWriter(args.output_dir)
 
-    database = Database(args.database)
+    # database = Database(args.database)
+    database = Database()
     agent = Chat_Module(
-            sp,
-            encoder,
-            decoder,
-            encoder_device=torch.device("cuda", 0),
-            decoder_device=torch.device("cuda", 0),
-            learning_agent_device=torch.device("cuda", 0),
-            chat_agent_device=torch.device("cuda", 0),
+            learning_agent_device=torch.device("cuda", 3),
+            chat_agent_device=torch.device("cuda", 3),
             batch_size=args.batch_size,
             n_latent=config.n_latent,
             max_len=config.max_len,
@@ -84,8 +84,16 @@ if __name__ == '__main__':
     system = ChatSystem(
             database,
             agent,
-            args.sample_size,
-            output_file=str(Path(args.output_dir)/"chat_database.json")
+            sp,
+            encoder,
+            decoder,
+            dbdc,
+            encoder_device=torch.device("cuda", 2),
+            decoder_device=torch.device("cuda", 2),
+            dbdc_device=torch.device("cuda", 2),
+            num_beams=5,
+            sample_size=args.sample_size,
+            max_len=config.max_len
             )
     
     if args.telegram:
