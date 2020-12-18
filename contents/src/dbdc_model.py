@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 import json
+import math
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -34,6 +35,42 @@ class DBDC(torch.nn.Module):
         out = self.fc2(self.relu(out))
         return self.sigmoid(out).squeeze()
 
+class DBDC_transformer(torch.nn.Module):
+    def __init__(self, n_latent, n_hidden, max_len, n_head=2, n_layers=2):
+        super(DBDC_transformer, self).__init__()
+
+        encoder_layer = torch.nn.TransformerEncoderLayer(d_model=n_latent, nhead=n_head)
+        self.transformer = torch.nn.TransformerEncoder(encoder_layer, num_layers=n_layers, norm=torch.nn.LayerNorm(n_latent))
+        self.fc1 = torch.nn.Linear(n_latent, n_hidden)
+        self.fc2 = torch.nn.Linear(n_hidden, 1)
+
+        self.relu = torch.nn.LeakyReLU()
+        self.sigmoid = torch.nn.Sigmoid()
+
+        pe = torch.zeros(max_len, n_latent)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, n_latent, 2).float() * (-math.log(10000.0) / n_latent))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x, conv_mask):
+        # input : (batch_size, seq_len, n_latent)
+        init = torch.ones(x.shape[0], 1, x.shape[-1], dtype=torch.float, device=x.device)
+        x = torch.cat((init, x), dim=1).transpose(0,1)
+        x = x + self.pe[:x.shape[0], :]
+
+        mask_init = torch.full((conv_mask.shape[0], 1), False, dtype=torch.bool, device=conv_mask.device)
+        conv_mask = torch.cat((mask_init, conv_mask), dim=1)
+        # x : (seq_len, batch_size, n_latent)
+        out = self.transformer(x, src_key_padding_mask=conv_mask)
+        # out : (seq_len, batch_size, n_latent)
+        out = out[0, :].squeeze()
+        # out : (batch_size, n_latent)
+
+        return self.sigmoid(self.fc2(self.relu(self.fc1(out)))).squeeze() # (batch_size)
+
 def encode(x, mask, batchsize, encoder):
     with torch.no_grad():
         x = encoder(x, attention_mask=mask)
@@ -66,13 +103,14 @@ def get_collate_fn():
 
         conv_len = [item.shape[0] for item in padded_tensors]
         max_conv_len = max(conv_len)
+        conv_mask = torch.cat([torch.tensor([False]*i + [True]*(max_conv_len - i), dtype=torch.bool).unsqueeze(0) for i in conv_len], dim=0)
 
         # padded_tensors = torch.cat([torch.cat((item, torch.full((max_conv_len -item.shape[0], item.shape[1]), 3, dtype=torch.long)), dim=0) for item in padded_tensors], dim=0)
         padded_tensors = torch.cat([torch.cat((item, torch.tensor([[1]+[2]+[3]*(item.shape[1]-2)]*(max_conv_len-item.shape[0]), dtype=torch.long)), dim=0) for item in padded_tensors], dim=0)
         # padding_masks = torch.cat([torch.cat((item, torch.full((max_conv_len -item.shape[0], item.shape[1]), True, dtype=torch.bool)), dim=0) for item in padding_masks], dim=0)
         padding_masks = torch.cat([torch.cat((item, torch.tensor([[False]*2+[True]*(item.shape[1]-2)]*(max_conv_len-item.shape[0]), dtype=torch.bool)), dim=0) for item in padding_masks], dim=0)
 
-        return {"input": padded_tensors, "mask": padding_masks, "conv_len": torch.tensor(conv_len), "score":scores}
+        return {"input": padded_tensors, "mask": padding_masks, "conv_len": torch.tensor(conv_len), "conv_mask": conv_mask, "score":scores}
 
     return _f
 
@@ -87,7 +125,9 @@ if __name__ == "__main__":
     parser.add_argument("--ff_hidden", type=int, default=128)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--num_epoch", type=int, default=100)
+    parser.add_argument("--num_epoch", type=int, default=100) 
+    parser.add_argument("--transformer", type=bool, default=False)
+    parser.add_argument("--max_conv_len", type=int, default=50) 
     args = parser.parse_args()
 
     hyper_param = Path(args.vae_checkpoint).parent / "hyper_param.json"
@@ -131,7 +171,10 @@ if __name__ == "__main__":
             pin_memory=True
             )
 
-    model = DBDC(config.n_latent, args.gru_hidden, args.ff_hidden)
+    if args.transformer:
+        model = DBDC_transformer(config.n_latent, args.ff_hidden, args.max_conv_len)
+    else:
+        model = DBDC(config.n_latent, args.gru_hidden, args.ff_hidden)
     model.to(device)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     loss_func = torch.nn.MSELoss()
@@ -140,7 +183,10 @@ if __name__ == "__main__":
     for item in tqdm.tqdm(val_dataloader):
         model.eval()
         x = encode(item["input"].to(device), item["mask"].to(device), item["conv_len"].shape[0], encoder)
-        out = model(x, item["conv_len"].to(device))
+        if args.transformer:
+            out = model(x, item["conv_mask"].to(device))
+        else:
+            out = model(x, item["conv_len"].to(device))
         loss = loss_func(out, item["score"].to(device))
         val_loss.append(loss.item())
     writer.add_scalar("val/initial", np.mean(val_loss), 0)
@@ -150,7 +196,10 @@ if __name__ == "__main__":
         for n, item in enumerate(tqdm.tqdm(train_dataloader)):
             model.train()
             x = encode(item["input"].to(device), item["mask"].to(device), item["conv_len"].shape[0], encoder)
-            out = model(x, item["conv_len"].to(device))
+            if args.transformer:
+                out = model(x, item["conv_mask"].to(device))
+            else:
+                out = model(x, item["conv_len"].to(device))
             loss = loss_func(out, item["score"].to(device))
             opt.zero_grad()
             loss.backward()
@@ -161,7 +210,10 @@ if __name__ == "__main__":
         for item in tqdm.tqdm(val_dataloader):
             model.eval()
             x = encode(item["input"].to(device), item["mask"].to(device), item["conv_len"].shape[0], encoder)
-            out = model(x, item["conv_len"].to(device))
+            if args.transformer:
+                out = model(x, item["conv_mask"].to(device))
+            else:
+                out = model(x, item["conv_len"].to(device))
             loss = loss_func(out, item["score"].to(device))
             val_loss.append(loss.item())
         losses = np.mean(val_loss)
