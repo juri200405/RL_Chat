@@ -174,11 +174,18 @@ class Agent:
             t_p.data.copy_(t_p.data * (1.0-self.tau) + p.data * self.tau)
 
         if writer is not None:
-            writer.add_scalar("val/log_alpha", self.log_alpha.item(), i)
             writer.add_scalar("loss/alpha", alpha_loss.item(), i)
             writer.add_scalar("loss/policy", policy_loss.item(), i)
             writer.add_scalar("loss/qf1", qf1_loss.item(), i)
             writer.add_scalar("loss/qf2", qf2_loss.item(), i)
+            writer.add_scalar("debug/log_alpha", self.log_alpha.item(), i)
+            writer.add_scalar("debug/alpha", alpha.item(), i)
+            writer.add_scalar("debug/log_prob", log_prob.mean().item(), i)
+            writer.add_scalar("debug/t_e", self.target_entropy, i)
+            writer.add_scalar("debug/min_q", min_q.mean().item(), i)
+            writer.add_scalar("debug/q1", q1.mean().item(), i)
+            writer.add_scalar("debug/q2", q2.mean().item(), i)
+            writer.add_scalar("debug/reward", reward.mean().item(), i)
 
     def act(self, state_size):
         state = torch.randn(1, state_size, device=self.device)
