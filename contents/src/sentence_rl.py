@@ -20,7 +20,14 @@ class Q_network(torch.nn.Module):
         self.sigmoid = torch.nn.Sigmoid()
 
     def forward(self, action):
-        return self.sigmoid(self.fc2(self.relu(self.fc1(action))))
+        # action : (batch_size, action_size)
+
+        h = self.relu(self.fc1(action))
+        # h : (batch_size, mid_size)
+
+        q = self.sigmoid(self.fc2(h))
+        # q : (batch_size, 1)
+        return  q.squeeze() # (batch_size)
 
 
 class Policy_network(torch.nn.Module):
@@ -42,9 +49,10 @@ class Policy_network(torch.nn.Module):
         log_std = torch.clamp(log_std, min=self.LOG_STD_MIN, max=self.LOG_STD_MAX)
         std = torch.exp(log_std)
 
-        return mean, std
+        return mean, std # (batch_size, action_size)
 
     def sample(self, obs):
+        # obs : (batch_size, state_size)
         mean, std = self.forward(obs)
         m = torch.distributions.MultivariateNormal(mean, torch.diag_embed(std))
         action = m.rsample()
@@ -137,28 +145,28 @@ class Agent:
         q1 = self.qf1(action)
         q2 = self.qf2(action)
 
-        with torch.no_grad():
-            min_q = torch.min(self.qf1(new_obs_action), self.qf2(new_obs_action))
-            alpha = torch.exp(self.log_alpha)
+        min_q = torch.min(self.qf1(new_obs_action), self.qf2(new_obs_action))
+        alpha = torch.exp(self.log_alpha)
 
         alpha_loss = -(self.log_alpha * (log_prob + self.target_entropy).detach()).mean()
-        policy_loss = (alpha * log_prob - min_q.detach()).mean()
+        policy_loss = (alpha * log_prob - min_q).mean()
         qf1_loss = self.qf_criterion(q1, reward)
         qf2_loss = self.qf_criterion(q2, reward)
 
         self.policy_opt.zero_grad()
-        self.qf1_opt.zero_grad()
-        self.qf2_opt.zero_grad()
-        self.alpha_opt.zero_grad()
-
         policy_loss.backward()
-        qf1_loss.backward()
-        qf2_loss.backward()
-        alpha_loss.backward()
-
         self.policy_opt.step()
+
+        self.qf1_opt.zero_grad()
+        qf1_loss.backward()
         self.qf1_opt.step()
+
+        self.qf2_opt.zero_grad()
+        qf2_loss.backward()
         self.qf2_opt.step()
+
+        self.alpha_opt.zero_grad()
+        alpha_loss.backward()
         self.alpha_opt.step()
 
         # target_qfの更新
@@ -177,6 +185,11 @@ class Agent:
     def act(self, state_size):
         state = torch.randn(1, state_size, device=self.device)
         action, _, _ = self.policy.sample(state)
+        return action
+
+    def mean_act(self, state_size):
+        state = torch.randn(1, state_size, device=self.device)
+        _, action, _ = self.policy.sample(state)
         return action
 
 
@@ -222,7 +235,7 @@ if __name__ == "__main__":
 
     # with open(args.grammar_data, "rt", encoding="utf-8") as f:
     #     data = json.load(f)
-    # memory = [{"action":tester.encode(item["utterance"]).cpu(), "reward":torch.tensor([[item["grammar"]]])} for item in data]
+    # memory = [{"action":tester.encode(item["utterance"]).cpu(), "reward":torch.tensor([item["grammar"]])} for item in data]
     data = []
     memory = []
 
@@ -258,6 +271,7 @@ if __name__ == "__main__":
         with torch.no_grad():
             for _ in range(args.num_experiment):
                 action = agent.act(state_size)
+                # action = agent.mean_act(state_size)
                 utt = tester.beam_generate(action, 5)[0]
                 if repeatedly.search(utt) is not None or head.search(utt) is not None or len(utt.strip()) == 0:
                     # print("reward from predefined")
@@ -279,8 +293,7 @@ if __name__ == "__main__":
                     #         else:
                     #             break
                     # reward_history[utt] = reward
-                print(reward)
-                memory.append({"action":action.cpu(), "reward":torch.tensor([[reward]])})
+                memory.append({"action":action.cpu(), "reward":torch.tensor([reward])})
                 data.append({"utterance":utt, "grammar":reward})
                 rewards += reward
             writer.add_scalar("experiment/avg_reward", rewards/args.num_experiment, epoch)
