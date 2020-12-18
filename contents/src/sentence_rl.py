@@ -141,7 +141,7 @@ class Agent:
         state = torch.randn(batch_size, state_size, device=self.device)
 
         new_obs_action, _, log_prob = self.policy.sample(state)
-        log_prob = log_prob.unsqueeze(-1)
+        # log_prob = log_prob.unsqueeze(-1)
         q1 = self.qf1(action)
         q2 = self.qf2(action)
 
@@ -242,22 +242,22 @@ if __name__ == "__main__":
     # memory = []
 
     repeatedly = re.compile(r"(.+)\1{3}")
-    head = re.compile("^[,ぁァぃィぅゥぇェぉォヵヶゃャゅュょョゎヮ」』]")
+    head = re.compile("^[,ぁァぃィぅゥぇェぉォヵヶゃャゅュょョゎヮ」』ー)]")
 
     i = 0
-    dataloader = get_dataloader(memory, 64)
-    agent.train()
-    for _ in range(20):
-        for action, reward in dataloader:
-            action = action.to(device)
-            reward = reward.to(device)
-            agent.learn_step(action, reward, state_size, i, writer)
-            i += 1
+    # dataloader = get_dataloader(memory, 64)
+    # agent.train()
+    # for _ in range(20):
+    #     for action, reward in dataloader:
+    #         action = action.to(device)
+    #         reward = reward.to(device)
+    #         agent.learn_step(action, reward, state_size, i, writer)
+    #         i += 1
 
     reward_history = dict()
 
     for epoch in range(args.num_epoch):
-        if epoch > 0:
+        if len(memory) > 0:
             print("*** #{} learn from memory ***".format(epoch))
             dataloader = get_dataloader(memory[:64*512], 64)
             agent.train()
@@ -273,7 +273,6 @@ if __name__ == "__main__":
         with torch.no_grad():
             for _ in range(args.num_experiment):
                 action = agent.act(state_size)
-                # action = agent.mean_act(state_size)
                 utt = tester.beam_generate(action, 5)[0]
                 if repeatedly.search(utt) is not None or head.search(utt) is not None or len(utt.strip()) == 0:
                     print("reward from predefined")
@@ -282,19 +281,19 @@ if __name__ == "__main__":
                     print("reward from history")
                     reward = reward_history[utt]
                 else:
-                    # reward = 1.0
-                    print(utt)
-                    while True:
-                        try:
-                            reward = float(input())
-                        except ValueError:
-                            print("try again")
-                        else:
-                            if reward < 0 or reward > 1:
-                                print("reward must be 0 <= r <= 1")
-                            else:
-                                break
-                    reward_history[utt] = reward
+                    reward = 1.0
+                    # print(utt)
+                    # while True:
+                    #     try:
+                    #         reward = float(input())
+                    #     except ValueError:
+                    #         print("try again")
+                    #     else:
+                    #         if reward < 0 or reward > 1:
+                    #             print("reward must be 0 <= r <= 1")
+                    #         else:
+                    #             break
+                    # reward_history[utt] = reward
                 memory.append({"action":action.cpu(), "reward":torch.tensor([reward])})
                 data.append({"utterance":utt, "grammar":reward})
                 rewards += reward
