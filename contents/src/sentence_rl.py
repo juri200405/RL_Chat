@@ -1,7 +1,7 @@
 import argparse
-import random
 from pathlib import Path
 import json
+import re
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -17,18 +17,19 @@ class Q_network(torch.nn.Module):
         self.fc1 = torch.nn.Linear(action_size, mid_size)
         self.fc2 = torch.nn.Linear(mid_size, 1)
         self.relu = torch.nn.LeakyReLU()
+        self.sigmoid = torch.nn.Sigmoid()
 
     def forward(self, action):
-        return self.fc2(self.relu(self.fc1(action)))
+        return self.sigmoid(self.fc2(self.relu(self.fc1(action))))
 
 
 class Policy_network(torch.nn.Module):
     LOG_STD_MAX = 2
     LOG_STD_MIN = -20
 
-    def __init__(self, action_size, mid_size):
+    def __init__(self, state_size, action_size, mid_size):
         super(Policy_network, self).__init__()
-        self.fc = torch.nn.Linear(1, mid_size)
+        self.fc = torch.nn.Linear(state_size, mid_size)
         self.mid2mean = torch.nn.Linear(mid_size, action_size)
         self.mid2logv = torch.nn.Linear(mid_size, action_size)
         self.relu = torch.nn.LeakyReLU()
@@ -59,10 +60,10 @@ class Policy_network(torch.nn.Module):
         return action, mean, log_prob
 
 class Agent:
-    def __init__(self, n_latent, device):
+    def __init__(self, state_size, n_latent, device):
         self.device = device
 
-        self.policy = Policy_network(n_latent, 1024)
+        self.policy = Policy_network(state_size, n_latent, 1024)
         self.qf1 = Q_network(n_latent, 1024)
         self.qf2 = Q_network(n_latent, 1024)
         self.target_qf1 = Q_network(n_latent, 1024)
@@ -127,9 +128,9 @@ class Agent:
         self.target_qf1.eval()
         self.target_qf2.eval()
 
-    def learn_step(self, action, reward, i, writer=None):
+    def learn_step(self, action, reward, state_size, i, writer=None):
         batch_size = action.shape[0]
-        state = torch.randn(batch_size, 1, device=self.device)
+        state = torch.randn(batch_size, state_size, device=self.device)
 
         new_obs_action, _, log_prob = self.policy.sample(state)
         log_prob = log_prob.unsqueeze(-1)
@@ -167,13 +168,14 @@ class Agent:
             t_p.data.copy_(t_p.data * (1.0-self.tau) + p.data * self.tau)
 
         if writer is not None:
+            writer.add_scalar("val/log_alpha", self.log_alpha.item(), i)
             writer.add_scalar("loss/alpha", alpha_loss.item(), i)
             writer.add_scalar("loss/policy", policy_loss.item(), i)
             writer.add_scalar("loss/qf1", qf1_loss.item(), i)
             writer.add_scalar("loss/qf2", qf2_loss.item(), i)
 
-    def act(self):
-        state = torch.randn(1, 1, device=self.device)
+    def act(self, state_size):
+        state = torch.randn(1, state_size, device=self.device)
         action, _, _ = self.policy.sample(state)
         return action
 
@@ -195,10 +197,10 @@ def get_dataloader(dataset, batchsize):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--vae_checkpoint")
-    parser.add_argument("--spm_model")
-    parser.add_argument("--grammar_data")
-    parser.add_argument("--output_dir")
+    parser.add_argument("--vae_checkpoint", required=True)
+    parser.add_argument("--spm_model", required=True)
+    parser.add_argument("--grammar_data", required=True)
+    parser.add_argument("--output_dir", required=True)
     parser.add_argument("--num_experiment", type=int, default=10)
     parser.add_argument("--num_epoch", type=int, default=10)
     args = parser.parse_args()
@@ -215,33 +217,69 @@ if __name__ == "__main__":
     tester.load_pt(args.vae_checkpoint)
 
     device = torch.device("cuda", 3)
-    agent = Agent(config.n_latent, device)
+    state_size = config.n_latent
+    agent = Agent(state_size, config.n_latent, device)
 
-    with open(args.grammar_data, "rt", encoding="utf-8") as f:
-        data = json.load(f)
-    memory = [{"action":tester.encode(item["utterance"]).cpu(), "reward":torch.tensor([[item["grammar"]]])} for item in data]
+    # with open(args.grammar_data, "rt", encoding="utf-8") as f:
+    #     data = json.load(f)
+    # memory = [{"action":tester.encode(item["utterance"]).cpu(), "reward":torch.tensor([[item["grammar"]]])} for item in data]
+    data = []
+    memory = []
+
+    repeatedly = re.compile(r"(.+)\1{3}")
+    head = re.compile("^[,ぁァぃィぅゥぇェぉォヵヶゃャゅュょョゎヮ」』]")
 
     i = 0
+    # dataloader = get_dataloader(memory, 64)
+    # agent.train()
+    # for _ in range(20):
+    #     for action, reward in dataloader:
+    #         action = action.to(device)
+    #         reward = reward.to(device)
+    #         agent.learn_step(action, reward, state_size, i, writer)
+    #         i += 1
+
+    # reward_history = dict()
+
     for epoch in range(args.num_epoch):
-        print("*** #{} learn from memory ***".format(epoch))
-        sample = random.sample(memory[:30000], 64*128)
-        dataloader = get_dataloader(sample, 64)
-        agent.train()
-        for action, reward in dataloader:
-            action = action.to(device)
-            reward = reward.to(device)
-            agent.learn_step(action, reward, i, writer)
-            i += 1
+        if epoch > 0:
+            print("*** #{} learn from memory ***".format(epoch))
+            dataloader = get_dataloader(memory[:64*512], 64)
+            agent.train()
+            for action, reward in dataloader:
+                action = action.to(device)
+                reward = reward.to(device)
+                agent.learn_step(action, reward, state_size, i, writer)
+                i += 1
 
         print("*** experiment ***")
         agent.eval()
         rewards = 0.0
         with torch.no_grad():
             for _ in range(args.num_experiment):
-                action = agent.act()
+                action = agent.act(state_size)
                 utt = tester.beam_generate(action, 5)[0]
-                print(utt)
-                reward = float(input())
+                if repeatedly.search(utt) is not None or head.search(utt) is not None or len(utt.strip()) == 0:
+                    # print("reward from predefined")
+                    reward = 0.0
+                # elif utt in reward_history:
+                #     print("reward from history")
+                #     reward = reward_history[utt]
+                else:
+                    reward = 1.0
+                    # print(utt)
+                    # while True:
+                    #     try:
+                    #         reward = float(input())
+                    #     except ValueError:
+                    #         print("try again")
+                    #     else:
+                    #         if reward < 0 or reward > 1:
+                    #             print("reward must be 0 <= r <= 1")
+                    #         else:
+                    #             break
+                    # reward_history[utt] = reward
+                print(reward)
                 memory.append({"action":action.cpu(), "reward":torch.tensor([[reward]])})
                 data.append({"utterance":utt, "grammar":reward})
                 rewards += reward
