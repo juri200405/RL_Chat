@@ -226,33 +226,33 @@ if __name__ == "__main__":
     config.load_json(str(Path(args.vae_checkpoint).with_name("hyper_param.json")))
     config.dropout = 0.0
 
-    tester = VAE_tester(config, sp, "cuda:2")
+    tester = VAE_tester(config, sp, "cuda:0")
     tester.load_pt(args.vae_checkpoint)
 
-    device = torch.device("cuda", 3)
+    device = torch.device("cuda", 1)
     state_size = config.n_latent
     agent = Agent(state_size, config.n_latent, device)
 
-    # with open(args.grammar_data, "rt", encoding="utf-8") as f:
-    #     data = json.load(f)
-    # memory = [{"action":tester.encode(item["utterance"]).cpu(), "reward":torch.tensor([item["grammar"]])} for item in data]
-    data = []
-    memory = []
+    with open(args.grammar_data, "rt", encoding="utf-8") as f:
+        data = json.load(f)
+    memory = [{"action":tester.encode(item["utterance"]).cpu(), "reward":torch.tensor([item["grammar"]])} for item in data]
+    # data = []
+    # memory = []
 
     repeatedly = re.compile(r"(.+)\1{3}")
     head = re.compile("^[,ぁァぃィぅゥぇェぉォヵヶゃャゅュょョゎヮ」』]")
 
     i = 0
-    # dataloader = get_dataloader(memory, 64)
-    # agent.train()
-    # for _ in range(20):
-    #     for action, reward in dataloader:
-    #         action = action.to(device)
-    #         reward = reward.to(device)
-    #         agent.learn_step(action, reward, state_size, i, writer)
-    #         i += 1
+    dataloader = get_dataloader(memory, 64)
+    agent.train()
+    for _ in range(20):
+        for action, reward in dataloader:
+            action = action.to(device)
+            reward = reward.to(device)
+            agent.learn_step(action, reward, state_size, i, writer)
+            i += 1
 
-    # reward_history = dict()
+    reward_history = dict()
 
     for epoch in range(args.num_epoch):
         if epoch > 0:
@@ -274,25 +274,25 @@ if __name__ == "__main__":
                 # action = agent.mean_act(state_size)
                 utt = tester.beam_generate(action, 5)[0]
                 if repeatedly.search(utt) is not None or head.search(utt) is not None or len(utt.strip()) == 0:
-                    # print("reward from predefined")
+                    print("reward from predefined")
                     reward = 0.0
-                # elif utt in reward_history:
-                #     print("reward from history")
-                #     reward = reward_history[utt]
+                elif utt in reward_history:
+                    print("reward from history")
+                    reward = reward_history[utt]
                 else:
-                    reward = 1.0
-                    # print(utt)
-                    # while True:
-                    #     try:
-                    #         reward = float(input())
-                    #     except ValueError:
-                    #         print("try again")
-                    #     else:
-                    #         if reward < 0 or reward > 1:
-                    #             print("reward must be 0 <= r <= 1")
-                    #         else:
-                    #             break
-                    # reward_history[utt] = reward
+                    # reward = 1.0
+                    print(utt)
+                    while True:
+                        try:
+                            reward = float(input())
+                        except ValueError:
+                            print("try again")
+                        else:
+                            if reward < 0 or reward > 1:
+                                print("reward must be 0 <= r <= 1")
+                            else:
+                                break
+                    reward_history[utt] = reward
                 memory.append({"action":action.cpu(), "reward":torch.tensor([reward])})
                 data.append({"utterance":utt, "grammar":reward})
                 rewards += reward
