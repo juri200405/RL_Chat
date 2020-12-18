@@ -91,8 +91,6 @@ class Agent:
         self.qf2_opt = torch.optim.Adam(self.qf2.parameters())
         self.alpha_opt = torch.optim.Adam([self.log_alpha])
 
-        self.tester = tester
-
         self.qf_criterion = torch.nn.MSELoss()
 
         self.target_entropy = float(-n_latent)
