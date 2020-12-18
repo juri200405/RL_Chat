@@ -128,6 +128,8 @@ if __name__ == "__main__":
     parser.add_argument("--num_epoch", type=int, default=100) 
     parser.add_argument("--transformer", type=bool, default=False)
     parser.add_argument("--max_conv_len", type=int, default=50) 
+    parser.add_argument("--n_head", type=int, default=2)
+    parser.add_argument("--n_layers", type=int, default=2)
     args = parser.parse_args()
 
     hyper_param = Path(args.vae_checkpoint).parent / "hyper_param.json"
@@ -172,7 +174,7 @@ if __name__ == "__main__":
             )
 
     if args.transformer:
-        model = DBDC_transformer(config.n_latent, args.ff_hidden, args.max_conv_len)
+        model = DBDC_transformer(config.n_latent, args.ff_hidden, args.max_conv_len, args.n_head, args.n_layers)
     else:
         model = DBDC(config.n_latent, args.gru_hidden, args.ff_hidden)
     model.to(device)
