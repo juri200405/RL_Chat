@@ -216,6 +216,7 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--num_experiment", type=int, default=10)
     parser.add_argument("--num_epoch", type=int, default=10)
+    parser.add_argument("--gpu", type=int, default=0)
     args = parser.parse_args()
 
     sp = spm.SentencePieceProcessor(model_file=args.spm_model)
@@ -226,10 +227,11 @@ if __name__ == "__main__":
     config.load_json(str(Path(args.vae_checkpoint).with_name("hyper_param.json")))
     config.dropout = 0.0
 
-    tester = VAE_tester(config, sp, "cuda:0")
+    device = torch.device("cuda", args.gpu)
+
+    tester = VAE_tester(config, sp, device)
     tester.load_pt(args.vae_checkpoint)
 
-    device = torch.device("cuda", 1)
     state_size = config.n_latent
     agent = Agent(state_size, config.n_latent, device)
 
