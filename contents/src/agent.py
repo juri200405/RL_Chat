@@ -84,7 +84,8 @@ class Agent:
             target_entropy=-128,
             discount=0.99,
             tau=5e-3,
-            initial_log_alpha=0.1
+            initial_log_alpha=0.1,
+            no_gru=False
             ):
         self.device = device
 
@@ -115,6 +116,8 @@ class Agent:
         self.qf1_opt = optim.Adam(self.qf1.parameters(), lr=lr)
         self.qf2_opt = optim.Adam(self.qf2.parameters(), lr=lr)
         self.alpha_opt = optim.Adam([self.log_alpha], lr=lr)
+
+        self.no_gru = True if (no_gru and n_latent == obs_size) else False
 
     def state_dict(self):
         return dict(
@@ -155,21 +158,30 @@ class Agent:
         next_hidden = next_hidden.to(self.device)   # (1, batch_size, obs_size)
         is_final = is_final.to(self.device)         # (batch_size)
 
-        obs, _ = self.gru(state, hidden)
+        if self.no_gru:
+            obs = state
+        else:
+            obs, _ = self.gru(state, hidden)
         obs = obs.squeeze(0)
+        obs_policy = obs.detach().requires_grad_()
+        obs_q1 = obs.detach().requires_grad_()
+        obs_q2 = obs.detach().requires_grad_()
 
-        new_obs_action, _, log_prob = self.policy.sample(obs)
+        new_obs_action, _, log_prob = self.policy.sample(obs_policy)
 
         alpha_loss = -(self.log_alpha * (log_prob + self.target_entropy).detach()).mean()
         alpha = torch.exp(self.log_alpha)
 
-        min_q = torch.min(self.qf1(new_obs_action, obs), self.qf2(new_obs_action, obs))
+        min_q = torch.min(self.qf1(new_obs_action, obs_policy), self.qf2(new_obs_action, obs_policy))
         policy_loss = (alpha * log_prob - min_q).mean()
 
-        q1 = self.qf1(action, obs)
-        q2 = self.qf2(action, obs)
+        q1 = self.qf1(action, obs_q1)
+        q2 = self.qf2(action, obs_q2)
 
-        next_obs, _ = self.gru(next_state, next_hidden)
+        if self.no_gru:
+            next_obs = next_state
+        else:
+            next_obs, _ = self.gru(next_state, next_hidden)
         next_obs = next_obs.squeeze(0)
         next_action, _, next_log_prob = self.policy.sample(next_obs)
         target_q = torch.min(self.target_qf1(next_action, next_obs), self.target_qf2(next_action, next_obs))
@@ -188,10 +200,13 @@ class Agent:
         self.qf1_opt.zero_grad()
         self.qf2_opt.zero_grad()
 
-        loss = policy_loss + qf1_loss + qf2_loss
-        loss.backward()
+        policy_loss.backward()
+        qf1_loss.backward()
+        qf2_loss.backward()
+        if not self.no_gru:
+            obs.backward(obs_policy.grad + obs_q1.grad + obs_q2.grad)
 
-        self.gru_opt.step()
+            self.gru_opt.step()
         self.policy_opt.step()
         self.qf1_opt.step()
         self.qf2_opt.step()
@@ -228,7 +243,11 @@ class Agent:
         self.qf2.eval()
 
     def act(self, state, hidden):
-        obs, next_hidden = self.gru(state, hidden)
+        if self.no_gru:
+            obs = state
+            next_hidden = hidden
+        else:
+            obs, next_hidden = self.gru(state, hidden)
         # obs : (batch_size(1), obs_size)
         # hidden : (1, batch_size(1), obs_size)
         action, _, _ = self.policy.sample(obs.squeeze(0))

@@ -65,7 +65,11 @@ if __name__ == "__main__":
     print("complete loading vae")
 
     obs_size = 64
-    agent = Agent(config.n_latent, obs_size, device, lr=1e-5, discount=0.0, initial_log_alpha=1e-4)
+    agent = Agent(config.n_latent, obs_size, device, lr=2e-6, discount=0.0, initial_log_alpha=1e-4, no_gru=True)
+
+    for i in range(50):
+        writer.add_scalar("debug/activation", agent.qf1.activation(torch.tensor([float(i)/10.0])).item(), i+50)
+        writer.add_scalar("debug/activation", agent.qf1.activation(torch.tensor([float(-i)/10.0])).item(), 50-i)
 
     data = []
     memory = []
@@ -121,7 +125,8 @@ if __name__ == "__main__":
                 memory_dict["hidden"] = hidden.detach().cpu()
                 memory_dict["action"] = action.detach().cpu()
                 memory_dict["reward"] = torch.tensor([reward])
-                state = action.unsqueeze(0).detach()
+                # state = action.unsqueeze(0).detach()
+                state = torch.randn(1,1,config.n_latent, device=device)
                 hidden = next_hidden.detach()
                 data.append({"utterance":utt, "reward":reward, "bleu":bleu, "pre": pre})
                 rewards += reward
