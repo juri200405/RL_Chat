@@ -65,7 +65,7 @@ if __name__ == "__main__":
     print("complete loading vae")
 
     obs_size = 128
-    agent = Agent(config.n_latent, obs_size, device, lr=1e-4)
+    agent = Agent(config.n_latent, obs_size, device, lr=1e-5)
 
     data = []
     memory = []
@@ -114,7 +114,8 @@ if __name__ == "__main__":
 
                 if len(utt) > 0:
                     utt_list.append(list(utt))
-                reward = pre + (1-bleu)
+                # reward = pre + (1-bleu)
+                reward = pre
 
                 memory_dict["state"] = state.detach().cpu()
                 memory_dict["hidden"] = hidden.detach().cpu()
