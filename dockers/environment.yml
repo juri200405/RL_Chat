@@ -9,16 +9,13 @@ dependencies:
   - torchvision
   - cudatoolkit=11.0
   - tensorboard
-  - future
   - tornado
+  - nltk
+  - APScheduler
   - decorator
   - filelock
-  - joblib
-  - regex
-  - pyparsing
   - packaging
   - pip:
     - sentencepiece
     - python-telegram-bot
     - transformers
-    - torch_optimizer

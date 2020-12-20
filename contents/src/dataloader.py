@@ -8,7 +8,7 @@ def get_collate_fn():
     def _f(batch):
         state = torch.cat([item["state"] for item in batch], dim=1)
         hidden = torch.cat([item["hidden"] for item in batch], dim=1)
-        action = torch.cat([item["action"] for item in batch], dim=1)
+        action = torch.cat([item["action"] for item in batch], dim=0)
         reward = torch.cat([item["reward"] for item in batch], dim=0)
         next_state = torch.cat([item["next_state"] for item in batch], dim=1)
         next_hidden = torch.cat([item["next_hidden"] for item in batch], dim=1)

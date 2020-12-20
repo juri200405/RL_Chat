@@ -18,13 +18,24 @@ class Q_network(nn.Module):
     def __init__(self, obs_size=1024, action_size=1024, mid_size=1024):
         super(Q_network, self).__init__()
         self.fc1 = nn.Linear(obs_size+action_size, mid_size)
-        self.fc2 = nn.Linear(mid_size, 1)
+        self.fc2 = nn.Linear(mid_size, 1, bias=False)
+        self.relu = torch.nn.LeakyReLU()
 
     def forward(self, action, obs):
+        # action : (batch_size, action_size)
+        # obs : (batch_size, obs_size)
+
         inp = torch.cat((action, obs), dim=-1)
-        q = F.relu(self.fc1(inp))
-        q = self.fc2(q)
-        return q
+        h = self.relu(self.fc1(inp))
+        q = self.fc2(h)
+        # q : (batch_size, 1)
+        return self.activation(q.squeeze()) # (batch_size)
+
+    def activation(self, x):
+        sign = torch.sign(x)
+        abs_x = torch.abs(x)
+        root = torch.sqrt(abs_x)
+        return torch.where(abs_x < 1, x, sign*root)
 
 class Policy_network(nn.Module):
     LOG_STD_MAX = 2
@@ -32,26 +43,29 @@ class Policy_network(nn.Module):
 
     def __init__(self, obs_size=1024, mid_size=1024, output_size=1024):
         super(Policy_network, self).__init__()
-        self.fc1 = nn.Linear(obs_size, mid_size)
-        self.fc2 = nn.Linear(mid_size, output_size*2)
+        self.fc = nn.Linear(obs_size, mid_size)
+        self.mid2mean = torch.nn.Linear(mid_size, output_size)
+        self.mid2logv = torch.nn.Linear(mid_size, output_size)
+        self.relu = torch.nn.LeakyReLU()
 
     def forward(self, obs):
-        policy = F.relu(self.fc1(obs))
-        policy = self.fc2(policy)
+        policy = self.relu(self.fc(obs))
+        mean = self.mid2mean(policy)
+        log_std = self.mid2logv(policy)
 
-        mean, log_std = torch.chunk(policy, 2, dim=-1)
         log_std = torch.clamp(log_std, min=self.LOG_STD_MIN, max=self.LOG_STD_MAX)
         std = torch.exp(log_std)
 
-        return mean, std
+        return mean, std # (batch_size, action_size)
 
     def sample(self, obs):
+        # obs : (batch_size, state_size)
         mean, std = self.forward(obs)
         m = MultivariateNormal(mean, torch.diag_embed(std))
         action = m.rsample()
         log_prob = m.log_prob(action)
 
-        return action, mean, log_prob
+        return action, mean, log_prob # (batch_size, action_size)
 
     def get_log_prob(self, obs, action):
         mean, std = self.forward(obs)
@@ -61,7 +75,7 @@ class Policy_network(nn.Module):
         return action, mean, log_prob
 
 class Agent:
-    def __init__(self, n_latent, obs_size, device, writer):
+    def __init__(self, n_latent, obs_size, device, lr=1e-3):
         self.device = device
 
         self.gru = nn.GRU(input_size=n_latent, hidden_size=obs_size)
@@ -75,7 +89,7 @@ class Agent:
         self.qf_criterion = nn.MSELoss()
 
         self.target_entropy = -1024
-        self.discount = 0.99
+        self.discount = 0.0
         self.tau = 5e-3
 
         self.target_qf1.load_state_dict(self.qf1.state_dict())
@@ -86,13 +100,11 @@ class Agent:
         self.target_qf1.eval()
         self.target_qf2.eval()
 
-        self.gru_opt = optim.Adam(self.gru.parameters())
-        self.policy_opt = optim.Adam(self.policy.parameters())
-        self.qf1_opt = optim.Adam(self.qf1.parameters())
-        self.qf2_opt = optim.Adam(self.qf2.parameters())
-        self.alpha_opt = optim.Adam([self.log_alpha])
-
-        self.writer = writer
+        self.gru_opt = optim.Adam(self.gru.parameters(), lr=lr)
+        self.policy_opt = optim.Adam(self.policy.parameters(), lr=lr)
+        self.qf1_opt = optim.Adam(self.qf1.parameters(), lr=lr)
+        self.qf2_opt = optim.Adam(self.qf2.parameters(), lr=lr)
+        self.alpha_opt = optim.Adam([self.log_alpha], lr=lr)
 
     def state_dict(self):
         return dict(
@@ -124,57 +136,66 @@ class Agent:
         self.target_qf1.to(device)
         self.target_qf2.to(device)
 
-    def learn(self, i, state, hidden, action, reward, next_state, next_hidden, is_final):
-        state = state.to(self.device)
-        hidden = hidden.to(self.device)
-        action = action.to(self.device)
-        reward = reward.to(self.device)
-        next_state = next_state.to(self.device)
-        next_hidden = next_hidden.to(self.device)
-        is_final = is_final.to(self.device)
+    def learn(self, state, hidden, action, reward, next_state, next_hidden, is_final):
+        state = state.to(self.device)               # (1, batch_size, n_latent)
+        hidden = hidden.to(self.device)             # (1, batch_size, obs_size)
+        action = action.to(self.device)             # (batch_size, n_latent)
+        reward = reward.to(self.device)             # (batch_size)
+        next_state = next_state.to(self.device)     # (1, batch_size, n_latent)
+        next_hidden = next_hidden.to(self.device)   # (1, batch_size, obs_size)
+        is_final = is_final.to(self.device)         # (batch_size)
 
         obs, _ = self.gru(state, hidden)
-        obs_policy = obs.detach().requires_grad_()
-        obs_q1 = obs.detach().requires_grad_()
-        obs_q2 = obs.detach().requires_grad_()
+        obs = obs.squeeze(0)
+        # obs_policy = obs.detach().requires_grad_()
+        # obs_q1 = obs.detach().requires_grad_()
+        # obs_q2 = obs.detach().requires_grad_()
 
-        new_obs_action, _, log_prob = self.policy.sample(obs_policy)
-        log_prob = log_prob.unsqueeze(-1)
-        q1 = self.qf1(action, obs_q1)
-        q2 = self.qf2(action, obs_q2)
-
-        with torch.no_grad():
-            min_q = torch.min(self.qf1(new_obs_action, obs), self.qf2(new_obs_action, obs))
-            next_obs, _ = self.gru(next_state, next_hidden)
-            next_action, _, next_log_prob = self.policy.sample(next_obs)
-            next_log_prob = next_log_prob.unsqueeze(-1)
-            alpha = torch.exp(self.log_alpha)
-            target_q = torch.min(self.target_qf1(next_action, next_obs), self.target_qf2(next_action, next_obs)) - alpha*next_log_prob
-            q_target = (reward + (1 - is_final) * self.discount * target_q).detach()
+        # new_obs_action, _, log_prob = self.policy.sample(obs_policy)
+        new_obs_action, _, log_prob = self.policy.sample(obs)
 
         alpha_loss = -(self.log_alpha * (log_prob + self.target_entropy).detach()).mean()
-        policy_loss = (alpha * log_prob - min_q.detach()).mean()
+        alpha = torch.exp(self.log_alpha)
+
+        # min_q = torch.min(self.qf1(new_obs_action, obs_policy), self.qf2(new_obs_action, obs_policy))
+        min_q = torch.min(self.qf1(new_obs_action, obs), self.qf2(new_obs_action, obs))
+        policy_loss = (alpha * log_prob - min_q).mean()
+
+        # q1 = self.qf1(action, obs_q1)
+        # q2 = self.qf2(action, obs_q2)
+        q1 = self.qf1(action, obs)
+        q2 = self.qf2(action, obs)
+
+        next_obs, _ = self.gru(next_state, next_hidden)
+        next_obs = next_obs.squeeze(0)
+        next_action, _, next_log_prob = self.policy.sample(next_obs)
+        target_q = torch.min(self.target_qf1(next_action, next_obs), self.target_qf2(next_action, next_obs))
+        q_target = (reward + (1 - is_final) * self.discount * (target_q - alpha*next_log_prob)).detach()
+
         qf1_loss = self.qf_criterion(q1, q_target)
         qf2_loss = self.qf_criterion(q2, q_target)
 
         # 各パラメータの更新
+        self.alpha_opt.zero_grad()
+        alpha_loss.backward()
+        self.alpha_opt.step()
+
         self.gru_opt.zero_grad()
         self.policy_opt.zero_grad()
         self.qf1_opt.zero_grad()
         self.qf2_opt.zero_grad()
-        self.alpha_opt.zero_grad()
 
-        policy_loss.backward()
-        qf1_loss.backward()
-        qf2_loss.backward()
-        alpha_loss.backward()
-        obs.backward(obs_q1.grad + obs_q2.grad + obs_policy.grad)
+        loss = policy_loss + qf1_loss + qf2_loss
+        loss.backward()
+        # policy_loss.backward()
+        # qf1_loss.backward()
+        # qf2_loss.backward()
+        # obs.backward(obs_policy.grad + obs_q2.grad + obs_policy.grad)
 
         self.gru_opt.step()
         self.policy_opt.step()
         self.qf1_opt.step()
         self.qf2_opt.step()
-        self.alpha_opt.step()
 
         # target_qfの更新
         for t_p, p in zip(self.target_qf1.parameters(), self.qf1.parameters()):
@@ -182,11 +203,19 @@ class Agent:
         for t_p, p in zip(self.target_qf2.parameters(), self.qf2.parameters()):
             t_p.data.copy_(t_p.data * (1.0-self.tau) + p.data * self.tau)
 
-        if self.writer is not None:
-            self.writer.add_scalar("alpha_loss", alpha_loss.item(), i)
-            self.writer.add_scalar("policy_loss", policy_loss.item(), i)
-            self.writer.add_scalar("qf1_loss", qf1_loss.item(), i)
-            self.writer.add_scalar("qf2_loss", qf2_loss.item(), i)
+        return {
+                "loss/alpha_loss": alpha_loss.item(),
+                "loss/policy_loss": policy_loss.item(),
+                "loss/qf1_loss": qf1_loss.item(),
+                "loss/qf2_loss": qf2_loss.item(),
+                "debug/log_alpha": self.log_alpha.item(),
+                "debug/alpha": alpha.item(),
+                "debug/log_prob": log_prob.mean().item(),
+                "debug/min_q": min_q.mean().item(),
+                "debug/q1": q1.mean().item(),
+                "debug/q2": q2.mean().item(),
+                "debug/reward": reward.mean().item()
+                }
 
     def train(self):
         self.gru.train()
@@ -199,6 +228,13 @@ class Agent:
         self.policy.eval()
         self.qf1.eval()
         self.qf2.eval()
+
+    def act(self, state, hidden):
+        obs, next_hidden = self.gru(state, hidden)
+        # obs : (batch_size(1), obs_size)
+        # hidden : (1, batch_size(1), obs_size)
+        action, _, _ = self.policy.sample(obs.squeeze(0))
+        return action, next_hidden
 
 
 class Chat_Module:
@@ -226,8 +262,7 @@ class Chat_Module:
     def act(self, state, hidden):
         self.chat_agent.eval()
         with torch.no_grad():
-            obs, next_hidden = self.chat_agent.gru(state.to(self.chat_agent.device), hidden.to(self.chat_agent.device)) # obs = (1, batch(1), n_latent), hidden = (1, batch(1), 1024)
-            action, _, _ = self.chat_agent.policy.sample(obs)
+            action, next_hidden = self.chat_agent.act(state, hidden)
 
         return action.cpu(), next_hidden.cpu()
 
