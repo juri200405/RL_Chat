@@ -31,7 +31,7 @@ def get_grammra_reward_function():
         if len(left.findall(utt)) != len(right.findall(utt)):
             return 0.0
 
-        return 2.0
+        return 1.0
 
     return _function
 
@@ -64,8 +64,8 @@ if __name__ == "__main__":
     tester.load_pt(args.vae_checkpoint)
     print("complete loading vae")
 
-    obs_size = 128
-    agent = Agent(config.n_latent, obs_size, device, lr=1e-5)
+    obs_size = 64
+    agent = Agent(config.n_latent, obs_size, device, lr=1e-5, discount=0.0, initial_log_alpha=1e-4)
 
     data = []
     memory = []
@@ -76,7 +76,7 @@ if __name__ == "__main__":
     for epoch in range(args.num_epoch):
         if len(memory) > 0:
             print("*** #{} learn from memory ***".format(epoch))
-            sample = random.sample(memory, min(64*32, len(memory)))
+            sample = random.sample(memory, min(64*64, len(memory)))
             dataloader = get_dataloader(sample, 64)
             agent.train()
             for batch in dataloader:

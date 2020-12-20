@@ -75,7 +75,17 @@ class Policy_network(nn.Module):
         return action, mean, log_prob
 
 class Agent:
-    def __init__(self, n_latent, obs_size, device, lr=1e-3):
+    def __init__(
+            self,
+            n_latent,
+            obs_size,
+            device,
+            lr=1e-3,
+            target_entropy=-128,
+            discount=0.99,
+            tau=5e-3,
+            initial_log_alpha=0.1
+            ):
         self.device = device
 
         self.gru = nn.GRU(input_size=n_latent, hidden_size=obs_size)
@@ -84,13 +94,13 @@ class Agent:
         self.qf2 = Q_network(obs_size=obs_size, action_size=n_latent)
         self.target_qf1 = Q_network(obs_size=obs_size, action_size=n_latent)
         self.target_qf2 = Q_network(obs_size=obs_size, action_size=n_latent)
-        self.log_alpha = torch.tensor([0.1], requires_grad=True, device=device)
+        self.log_alpha = torch.tensor([initial_log_alpha], requires_grad=True, device=device)
 
         self.qf_criterion = nn.MSELoss()
 
-        self.target_entropy = -1024
-        self.discount = 0.0
-        self.tau = 5e-3
+        self.target_entropy = target_entropy
+        self.discount = discount
+        self.tau = tau
 
         self.target_qf1.load_state_dict(self.qf1.state_dict())
         self.target_qf2.load_state_dict(self.qf2.state_dict())
@@ -147,22 +157,15 @@ class Agent:
 
         obs, _ = self.gru(state, hidden)
         obs = obs.squeeze(0)
-        # obs_policy = obs.detach().requires_grad_()
-        # obs_q1 = obs.detach().requires_grad_()
-        # obs_q2 = obs.detach().requires_grad_()
 
-        # new_obs_action, _, log_prob = self.policy.sample(obs_policy)
         new_obs_action, _, log_prob = self.policy.sample(obs)
 
         alpha_loss = -(self.log_alpha * (log_prob + self.target_entropy).detach()).mean()
         alpha = torch.exp(self.log_alpha)
 
-        # min_q = torch.min(self.qf1(new_obs_action, obs_policy), self.qf2(new_obs_action, obs_policy))
         min_q = torch.min(self.qf1(new_obs_action, obs), self.qf2(new_obs_action, obs))
         policy_loss = (alpha * log_prob - min_q).mean()
 
-        # q1 = self.qf1(action, obs_q1)
-        # q2 = self.qf2(action, obs_q2)
         q1 = self.qf1(action, obs)
         q2 = self.qf2(action, obs)
 
@@ -187,10 +190,6 @@ class Agent:
 
         loss = policy_loss + qf1_loss + qf2_loss
         loss.backward()
-        # policy_loss.backward()
-        # qf1_loss.backward()
-        # qf2_loss.backward()
-        # obs.backward(obs_policy.grad + obs_q2.grad + obs_policy.grad)
 
         self.gru_opt.step()
         self.policy_opt.step()
@@ -208,7 +207,6 @@ class Agent:
                 "loss/policy_loss": policy_loss.item(),
                 "loss/qf1_loss": qf1_loss.item(),
                 "loss/qf2_loss": qf2_loss.item(),
-                "debug/log_alpha": self.log_alpha.item(),
                 "debug/alpha": alpha.item(),
                 "debug/log_prob": log_prob.mean().item(),
                 "debug/min_q": min_q.mean().item(),

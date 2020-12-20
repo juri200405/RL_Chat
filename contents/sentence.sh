@@ -4,7 +4,7 @@
 	--vae_checkpoint data/tomioka/output/transformer_vae/2020_12_02/2/epoch009.pt \
 	--spm_model data/tomioka/spm_model/no_kwdlc.model \
 	--grammar_data data/tomioka/grammar.json \
-	--output_dir data/tomioka/output/sentence/2020_12_20/10/ \
+	--output_dir data/tomioka/output/sentence/2020_12_20/11/ \
 	--num_epoch 1000 \
 	--num_experiment 20 \
-	--gpu 1
+	--gpu 0
