@@ -15,11 +15,12 @@ import encoder_decoder
 from dataloader import get_dataloader
 
 class Q_network(nn.Module):
-    def __init__(self, obs_size=1024, action_size=1024, mid_size=1024):
+    def __init__(self, activation, obs_size=1024, action_size=1024, mid_size=1024):
         super(Q_network, self).__init__()
         self.fc1 = nn.Linear(obs_size+action_size, mid_size)
         self.fc2 = nn.Linear(mid_size, 1, bias=False)
         self.relu = torch.nn.LeakyReLU()
+        self.activation = activation
 
     def forward(self, action, obs):
         # action : (batch_size, action_size)
@@ -30,12 +31,6 @@ class Q_network(nn.Module):
         q = self.fc2(h)
         # q : (batch_size, 1)
         return self.activation(q.squeeze()) # (batch_size)
-
-    def activation(self, x):
-        sign = torch.sign(x)
-        abs_x = torch.abs(x)
-        root = torch.sqrt(abs_x)
-        return torch.where(abs_x < 1, x, sign*root)
 
 class Policy_network(nn.Module):
     LOG_STD_MAX = 2
@@ -77,6 +72,7 @@ class Policy_network(nn.Module):
 class Agent:
     def __init__(
             self,
+            activation,
             n_latent,
             obs_size,
             device,
@@ -91,10 +87,10 @@ class Agent:
 
         self.gru = nn.GRU(input_size=n_latent, hidden_size=obs_size)
         self.policy = Policy_network(obs_size=obs_size, output_size=n_latent)
-        self.qf1 = Q_network(obs_size=obs_size, action_size=n_latent)
-        self.qf2 = Q_network(obs_size=obs_size, action_size=n_latent)
-        self.target_qf1 = Q_network(obs_size=obs_size, action_size=n_latent)
-        self.target_qf2 = Q_network(obs_size=obs_size, action_size=n_latent)
+        self.qf1 = Q_network(activation, obs_size=obs_size, action_size=n_latent)
+        self.qf2 = Q_network(activation, obs_size=obs_size, action_size=n_latent)
+        self.target_qf1 = Q_network(activation, obs_size=obs_size, action_size=n_latent)
+        self.target_qf2 = Q_network(activation, obs_size=obs_size, action_size=n_latent)
         self.log_alpha = torch.tensor([initial_log_alpha], requires_grad=True, device=device)
 
         self.qf_criterion = nn.MSELoss()
@@ -149,15 +145,7 @@ class Agent:
         self.target_qf1.to(device)
         self.target_qf2.to(device)
 
-    def learn(self, state, hidden, action, reward, next_state, next_hidden, is_final):
-        state = state.to(self.device)               # (1, batch_size, n_latent)
-        hidden = hidden.to(self.device)             # (1, batch_size, obs_size)
-        action = action.to(self.device)             # (batch_size, n_latent)
-        reward = reward.to(self.device)             # (batch_size)
-        next_state = next_state.to(self.device)     # (1, batch_size, n_latent)
-        next_hidden = next_hidden.to(self.device)   # (1, batch_size, obs_size)
-        is_final = is_final.to(self.device)         # (batch_size)
-
+    def calc_loss(self, state, hidden, action, reward, next_state, next_hidden, is_final):
         if self.no_gru:
             obs = state
         else:
@@ -185,10 +173,37 @@ class Agent:
         next_obs = next_obs.squeeze(0)
         next_action, _, next_log_prob = self.policy.sample(next_obs)
         target_q = torch.min(self.target_qf1(next_action, next_obs), self.target_qf2(next_action, next_obs))
+
         q_target = (reward + (1 - is_final) * self.discount * (target_q - alpha*next_log_prob)).detach()
 
         qf1_loss = self.qf_criterion(q1, q_target)
         qf2_loss = self.qf_criterion(q2, q_target)
+
+        out_dict = {
+                "loss/alpha_loss": alpha_loss.item(),
+                "loss/policy_loss": policy_loss.item(),
+                "loss/qf1_loss": qf1_loss.item(),
+                "loss/qf2_loss": qf2_loss.item(),
+                "debug/alpha": alpha.item(),
+                "debug/log_prob": log_prob.mean().item(),
+                "debug/min_q": min_q.mean().item(),
+                "debug/q1": q1.mean().item(),
+                "debug/q2": q2.mean().item(),
+                "debug/reward": reward.mean().item()
+                }
+
+        return alpha_loss, policy_loss, qf1_loss, qf2_loss, out_dict
+
+    def learn(self, state, hidden, action, reward, next_state, next_hidden, is_final, graph=False):
+        state = state.to(self.device)               # (1, batch_size, n_latent)
+        hidden = hidden.to(self.device)             # (1, batch_size, obs_size)
+        action = action.to(self.device)             # (batch_size, n_latent)
+        reward = reward.to(self.device)             # (batch_size)
+        next_state = next_state.to(self.device)     # (1, batch_size, n_latent)
+        next_hidden = next_hidden.to(self.device)   # (1, batch_size, obs_size)
+        is_final = is_final.to(self.device)         # (batch_size)
+
+        alpha_loss, policy_loss, qf1_loss, qf2_loss, out_dict = self.calc_loss(state, hidden, action, reward, next_state, next_hidden, is_final)
 
         # 各パラメータの更新
         self.alpha_opt.zero_grad()
@@ -217,18 +232,12 @@ class Agent:
         for t_p, p in zip(self.target_qf2.parameters(), self.qf2.parameters()):
             t_p.data.copy_(t_p.data * (1.0-self.tau) + p.data * self.tau)
 
-        return {
-                "loss/alpha_loss": alpha_loss.item(),
-                "loss/policy_loss": policy_loss.item(),
-                "loss/qf1_loss": qf1_loss.item(),
-                "loss/qf2_loss": qf2_loss.item(),
-                "debug/alpha": alpha.item(),
-                "debug/log_prob": log_prob.mean().item(),
-                "debug/min_q": min_q.mean().item(),
-                "debug/q1": q1.mean().item(),
-                "debug/q2": q2.mean().item(),
-                "debug/reward": reward.mean().item()
-                }
+        if graph:
+            losses = {"alpha_loss":alpha_loss, "policy_loss":policy_loss, "qf1_loss":qf1_loss, "qf2_loss":qf2_loss}
+        else:
+            losses = None
+
+        return out_dict, losses
 
     def train(self):
         self.gru.train()

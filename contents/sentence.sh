@@ -4,7 +4,12 @@
 	--vae_checkpoint data/tomioka/output/transformer_vae/2020_12_02/2/epoch009.pt \
 	--spm_model data/tomioka/spm_model/no_kwdlc.model \
 	--grammar_data data/tomioka/grammar.json \
-	--output_dir data/tomioka/output/sentence/2020_12_20/16/ \
+	--output_dir data/tomioka/output/sentence/2020_12_22/0/ \
 	--num_epoch 1000 \
 	--num_experiment 20 \
-	--gpu 3
+	--gpu 3 \
+	--lr 5e-6 \
+	--discount 0.0 \
+	--initial_log_alpha 1e-4 \
+	--no_gru True \
+	--activation sqrt

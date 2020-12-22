@@ -66,5 +66,5 @@ RUN echo "conda activate pl" >> ~/.bashrc
 # RUN git clone https://github.com/NVIDIA/apex
 # RUN pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./apex
 
-ENV PYTHONPATH src
+ENV PYTHONPATH src:torchviz
 ENV LRU_CACHE_CAPACITY 1

@@ -19,3 +19,4 @@ dependencies:
     - sentencepiece
     - python-telegram-bot
     - transformers
+    - graphviz

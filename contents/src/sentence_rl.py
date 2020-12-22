@@ -9,6 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import sentencepiece as spm
 from nltk import bleu_score
+from torchviz import make_dot
 
 from vae_check import VAE_tester
 from config import Config
@@ -36,6 +37,15 @@ def get_grammra_reward_function():
     return _function
 
 
+def sqrt_activation(x):
+    sign = torch.sign(x)
+    abs_x = torch.abs(x)
+    root = torch.sqrt(abs_x)
+    return torch.where(abs_x < 1, x, sign*root)
+
+def none_activation(x):
+    return x
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--vae_checkpoint", required=True)
@@ -45,6 +55,11 @@ if __name__ == "__main__":
     parser.add_argument("--num_experiment", type=int, default=10)
     parser.add_argument("--num_epoch", type=int, default=10)
     parser.add_argument("--gpu", type=int, default=0)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--discount", type=float, default=0.99)
+    parser.add_argument("--initial_log_alpha", type=float, default=1e-4)
+    parser.add_argument("--no_gru", type=bool, default=False)
+    parser.add_argument("--activation", choices=["sqrt", "sigmoid", "none"], default="none")
     args = parser.parse_args()
 
     sp = spm.SentencePieceProcessor(model_file=args.spm_model)
@@ -64,12 +79,30 @@ if __name__ == "__main__":
     tester.load_pt(args.vae_checkpoint)
     print("complete loading vae")
 
-    obs_size = 64
-    agent = Agent(config.n_latent, obs_size, device, lr=2e-6, discount=0.0, initial_log_alpha=1e-4, no_gru=True)
+    if args.activation == "none":
+        activation_function = none_activation
+    elif args.activation == "sqrt":
+        activation_function = sqrt_activation
+    elif args.activation == "sigmoid":
+        activation_function = torch.nn.Sigmoid()
 
-    for i in range(50):
-        writer.add_scalar("debug/activation", agent.qf1.activation(torch.tensor([float(i)/10.0])).item(), i+50)
-        writer.add_scalar("debug/activation", agent.qf1.activation(torch.tensor([float(-i)/10.0])).item(), 50-i)
+    obs_size = 64
+    agent = Agent(
+            activation_function,
+            config.n_latent,
+            obs_size,
+            device,
+            lr=args.lr,
+            discount=args.discount,
+            initial_log_alpha=args.initial_log_alpha,
+            no_gru=args.no_gru
+            )
+
+    for i in range(100):
+        writer.add_scalar("debug/activation", activation_function(torch.tensor([float(i-50)/10.0])).item(), i)
+
+    with open(str(Path(args.output_dir)/"arguments.json"), "wt", encoding="utf-8") as f:
+        json.dump(vars(args), f, indent=2, ensure_ascii=False)
 
     data = []
     memory = []
@@ -84,7 +117,30 @@ if __name__ == "__main__":
             dataloader = get_dataloader(sample, 64)
             agent.train()
             for batch in dataloader:
-                result_dict = agent.learn(*batch)
+                graph = True if i ==0 else False
+                result_dict, losses = agent.learn(*batch, graph=graph)
+                if losses is not None:
+                    state, hidden, action, reward, next_state, next_hidden, is_final = batch
+                    input_list = [
+                            ("state",state),
+                            ("hidden",hidden),
+                            ("action",action),
+                            ("reward",reward),
+                            ("next_state",next_state),
+                            ("next_hidden",next_hidden),
+                            ("is_final",is_final)
+                            ]
+                    param_list = list(agent.policy.named_parameters()) \
+                            + list(agent.qf1.named_parameters()) \
+                            + list(agent.qf2.named_parameters()) \
+                            + list(agent.target_qf1.named_parameters()) \
+                            + list(agent.target_qf2.named_parameters()) \
+                            + list(agent.gru.named_parameters()) \
+                            + [("log_alpha", agent.log_alpha)]
+
+                    for name, item in losses.items():
+                        make_dot(item, params=dict(input_list+param_list)).render(str(Path(args.output_dir)/name))
+
                 for name, item in result_dict.items():
                     writer.add_scalar(name, item, i)
                 i += 1
