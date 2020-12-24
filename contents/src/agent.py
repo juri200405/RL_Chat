@@ -113,7 +113,7 @@ class Agent:
         self.qf2_opt = optim.Adam(self.qf2.parameters(), lr=lr)
         self.alpha_opt = optim.Adam([self.log_alpha], lr=lr)
 
-        self.no_gru = True if (no_gru and n_latent == obs_size) else False
+        self.no_gru = True if (no_gru or n_latent != obs_size) else False
 
     def state_dict(self):
         return dict(
@@ -145,19 +145,22 @@ class Agent:
         self.target_qf1.to(device)
         self.target_qf2.to(device)
 
-    def learn(self, state, hidden, action, reward, next_state, next_hidden, is_final, graph=False):
+    def learn(self, state, hidden, action, reward, next_state, next_hidden, is_final, graph=False, use_history_hidden=False):
         state = state.to(self.device)               # (batch_size, n_latent)
-        hidden = hidden.to(self.device)             # (batch_size, obs_size)
+        hidden = hidden[:state.shape[0], :].to(self.device)             # (batch_size, obs_size)
         action = action.to(self.device)             # (batch_size, n_latent)
         reward = reward.to(self.device)             # (batch_size)
         next_state = next_state.to(self.device)     # (batch_size, n_latent)
-        next_hidden = next_hidden.to(self.device)   # (batch_size, obs_size)
+        if use_history_hidden:
+            next_hidden = next_hidden.to(self.device)   # (batch_size, obs_size)
         is_final = is_final.to(self.device)         # (batch_size)
 
         if self.no_gru:
             obs = state
         else:
-            obs, _ = self.gru(state, hidden)
+            obs = self.gru(state, hidden)
+            if not use_history_hidden:
+                next_hidden = obs
         obs_policy = obs.detach().requires_grad_()
         obs_q1 = obs.detach().requires_grad_()
         obs_q2 = obs.detach().requires_grad_()
@@ -176,14 +179,14 @@ class Agent:
         if self.no_gru:
             next_obs = next_state
         else:
-            next_obs, _ = self.gru(next_state, next_hidden)
+            next_obs = self.gru(next_state, next_hidden)
         next_action, _, next_log_prob = self.policy.sample(next_obs)
         target_q = torch.min(self.target_qf1(next_action, next_obs), self.target_qf2(next_action, next_obs))
 
         q_target = (reward + (1 - is_final) * self.discount * (target_q - alpha*next_log_prob)).detach()
 
-        qf1_loss = self.qf_criterion(q1, q_target)
-        qf2_loss = self.qf_criterion(q2, q_target)
+        qf1_loss = self.qf_criterion(q1, q_target.detach())
+        qf2_loss = self.qf_criterion(q2, q_target.detach())
 
         # 各パラメータの更新
         self.alpha_opt.zero_grad()
@@ -230,7 +233,7 @@ class Agent:
         else:
             losses = None
 
-        return out_dict, losses
+        return next_hidden.detach(), out_dict, losses
 
     def train(self):
         self.gru.train()
@@ -249,7 +252,8 @@ class Agent:
             obs = state
             next_hidden = hidden
         else:
-            obs, next_hidden = self.gru(state, hidden)
+            obs = self.gru(state, hidden)
+            next_hidden = obs
         # obs : (batch_size(1), obs_size)
         # hidden : (batch_size(1), obs_size)
         action, _, _ = self.policy.sample(obs)
