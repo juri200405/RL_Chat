@@ -61,6 +61,7 @@ if __name__ == "__main__":
     parser.add_argument("--initial_log_alpha", type=float, default=1e-4)
     parser.add_argument("--no_gru", action='store_true')
     parser.add_argument("--use_history_hidden", action='store_true')
+    parser.add_argument("--random_state", action='store_true')
     parser.add_argument("--activation", choices=["sqrt", "sigmoid", "none", "tanh"], default="none")
     parser.add_argument("--additional_reward", choices=["none", "bleu", "cos"], default="none")
     args = parser.parse_args()
@@ -244,14 +245,19 @@ if __name__ == "__main__":
                 memory_dict["hidden"] = hidden.detach().cpu()
                 memory_dict["action"] = action.detach().cpu()
                 memory_dict["reward"] = torch.tensor([reward])
-                state = action.detach()
 
                 # メモリからの行動
                 t_memory_dict["state"] = state.detach().cpu()
                 t_memory_dict["hidden"] = hidden.detach().cpu()
                 t_memory_dict["action"] = t_action.detach().cpu()
                 t_memory_dict["reward"] = torch.tensor([t_reward])
-                t_state = t_action.detach()
+
+                if args.random_state:
+                    state = torch.randn_like(state)
+                    t_state = torch.randn_like(state)
+                else:
+                    state = action.detach()
+                    t_state = t_action.detach()
 
                 hidden = next_hidden.detach()
                 data.append(data_dict)
