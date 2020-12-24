@@ -59,7 +59,8 @@ if __name__ == "__main__":
     parser.add_argument("--discount", type=float, default=0.99)
     parser.add_argument("--initial_log_alpha", type=float, default=1e-4)
     parser.add_argument("--no_gru", type=bool, default=False)
-    parser.add_argument("--activation", choices=["sqrt", "sigmoid", "none"], default="none")
+    parser.add_argument("--activation", choices=["sqrt", "sigmoid", "none", "tanh"], default="none")
+    parser.add_argument("--training_num", type=int, default=32)
     args = parser.parse_args()
 
     sp = spm.SentencePieceProcessor(model_file=args.spm_model)
@@ -85,6 +86,8 @@ if __name__ == "__main__":
         activation_function = sqrt_activation
     elif args.activation == "sigmoid":
         activation_function = torch.nn.Sigmoid()
+    elif args.activation == "tanh":
+        activation_function = torch.nn.Tanh()
 
     obs_size = 64
     agent = Agent(
@@ -95,7 +98,8 @@ if __name__ == "__main__":
             lr=args.lr,
             discount=args.discount,
             initial_log_alpha=args.initial_log_alpha,
-            no_gru=args.no_gru
+            no_gru=args.no_gru,
+            target_entropy=-config.n_latent
             )
 
     for i in range(100):
@@ -104,6 +108,9 @@ if __name__ == "__main__":
     with open(str(Path(args.output_dir)/"arguments.json"), "wt", encoding="utf-8") as f:
         json.dump(vars(args), f, indent=2, ensure_ascii=False)
 
+    with open(args.grammar_data, "rt", encoding="utf-8") as f:
+        init_data = json.load(f)
+    init_data = [(item["utterance"], tester.encode(item["utterance"]), item["grammar"]) for item in init_data]
     data = []
     memory = []
 
@@ -113,7 +120,7 @@ if __name__ == "__main__":
     for epoch in range(args.num_epoch):
         if len(memory) > 0:
             print("*** #{} learn from memory ***".format(epoch))
-            sample = random.sample(memory, min(64*64, len(memory)))
+            sample = random.sample(memory, min(64*args.training_num, len(memory)))
             dataloader = get_dataloader(sample, 64)
             agent.train()
             for batch in dataloader:
@@ -149,11 +156,13 @@ if __name__ == "__main__":
         agent.eval()
         rewards = 0.0
         memory_dict = dict()
+        t_memory_dict = dict()
         utt_list = []
         with torch.no_grad():
-            state = torch.randn(1, 1, config.n_latent, device=device)
-            hidden = torch.zeros(1, 1, obs_size, device=device)
+            state = torch.randn(1, config.n_latent, device=device)
+            hidden = torch.zeros(1, obs_size, device=device)
             for _ in range(args.num_experiment):
+                # エージェントの出力行動
                 if "state" in memory_dict:
                     memory_dict["next_state"] = state.detach().cpu()
                     memory_dict["next_hidden"] = hidden.detach().cpu()
@@ -161,36 +170,65 @@ if __name__ == "__main__":
                     memory.append(memory_dict)
                     memory_dict = dict()
 
+                # メモリからの行動
+                if "state" in t_memory_dict:
+                    t_memory_dict["next_state"] = t_state.detach().cpu()
+                    t_memory_dict["next_hidden"] = hidden.detach().cpu()
+                    t_memory_dict["is_final"] = torch.tensor([0.0])
+                    memory.append(t_memory_dict)
+                    t_memory_dict = dict()
+
                 action, next_hidden = agent.act(state, hidden)
                 utt = tester.beam_generate(action, 5)[0]
-
                 pre = is_predefined(utt)
+
+                t_utt, t_action, t_pre = random.choice(init_data)
+
                 if len(utt) == 0:
                     bleu = 1
+                elif len(t_utt) == 0:
+                    t_bleu = 1
                 elif len(utt_list) > 0:
-                    bleu = bleu_score.sentence_bleu(utt_list, list(utt), smoothing_function=bleu_score.SmoothingFunction().method1)
+                    bleu = bleu_score.sentence_bleu(utt_list, list(utt), smoothing_function=bleu_score.SmoothingFunction().method1, weights=(0.5, 0.5))
+                    t_bleu = bleu_score.sentence_bleu(utt_list, list(t_utt), smoothing_function=bleu_score.SmoothingFunction().method1, weights=(0.5, 0.5))
                 else:
                     bleu = 0
+                    t_bleu = 0
 
                 if len(utt) > 0:
                     utt_list.append(list(utt))
-                # reward = pre + (1-bleu)
-                reward = pre
+                reward = pre - bleu
+                t_reward = t_pre - t_bleu
 
+                # エージェントの出力行動
                 memory_dict["state"] = state.detach().cpu()
                 memory_dict["hidden"] = hidden.detach().cpu()
                 memory_dict["action"] = action.detach().cpu()
                 memory_dict["reward"] = torch.tensor([reward])
-                # state = action.unsqueeze(0).detach()
-                state = torch.randn(1,1,config.n_latent, device=device)
+                state = action.detach()
+
+                # メモリからの行動
+                t_memory_dict["state"] = state.detach().cpu()
+                t_memory_dict["hidden"] = hidden.detach().cpu()
+                t_memory_dict["action"] = t_action.detach().cpu()
+                t_memory_dict["reward"] = torch.tensor([t_reward])
+                t_state = t_action.detach()
+
                 hidden = next_hidden.detach()
                 data.append({"utterance":utt, "reward":reward, "bleu":bleu, "pre": pre})
                 rewards += reward
 
+            # エージェントの出力行動
             memory_dict["next_state"] = state.cpu()
             memory_dict["next_hidden"] = hidden.cpu()
             memory_dict["is_final"] = torch.tensor([1.0])
             memory.append(memory_dict)
+
+            # メモリからの行動
+            t_memory_dict["next_state"] = t_state.cpu()
+            t_memory_dict["next_hidden"] = hidden.cpu()
+            t_memory_dict["is_final"] = torch.tensor([1.0])
+            memory.append(t_memory_dict)
             writer.add_scalar("experiment/total_reward", rewards, epoch)
 
         torch.save(agent.state_dict(), str(Path(args.output_dir)/"epoch{:04d}.pt".format(epoch)))

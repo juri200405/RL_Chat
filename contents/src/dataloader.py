@@ -6,12 +6,12 @@ from torch.utils.data.sampler import RandomSampler
 def get_collate_fn():
 
     def _f(batch):
-        state = torch.cat([item["state"] for item in batch], dim=1)
-        hidden = torch.cat([item["hidden"] for item in batch], dim=1)
+        state = torch.cat([item["state"] for item in batch], dim=0)
+        hidden = torch.cat([item["hidden"] for item in batch], dim=0)
         action = torch.cat([item["action"] for item in batch], dim=0)
         reward = torch.cat([item["reward"] for item in batch], dim=0)
-        next_state = torch.cat([item["next_state"] for item in batch], dim=1)
-        next_hidden = torch.cat([item["next_hidden"] for item in batch], dim=1)
+        next_state = torch.cat([item["next_state"] for item in batch], dim=0)
+        next_hidden = torch.cat([item["next_hidden"] for item in batch], dim=0)
         is_final = torch.cat([item["is_final"] for item in batch], dim=0)
 
         return state, hidden, action, reward, next_state, next_hidden, is_final

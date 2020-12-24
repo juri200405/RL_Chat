@@ -85,7 +85,7 @@ class Agent:
             ):
         self.device = device
 
-        self.gru = nn.GRU(input_size=n_latent, hidden_size=obs_size)
+        self.gru = nn.GRUCell(input_size=n_latent, hidden_size=obs_size)
         self.policy = Policy_network(obs_size=obs_size, output_size=n_latent)
         self.qf1 = Q_network(activation, obs_size=obs_size, action_size=n_latent)
         self.qf2 = Q_network(activation, obs_size=obs_size, action_size=n_latent)
@@ -145,12 +145,19 @@ class Agent:
         self.target_qf1.to(device)
         self.target_qf2.to(device)
 
-    def calc_loss(self, state, hidden, action, reward, next_state, next_hidden, is_final):
+    def learn(self, state, hidden, action, reward, next_state, next_hidden, is_final, graph=False):
+        state = state.to(self.device)               # (batch_size, n_latent)
+        hidden = hidden.to(self.device)             # (batch_size, obs_size)
+        action = action.to(self.device)             # (batch_size, n_latent)
+        reward = reward.to(self.device)             # (batch_size)
+        next_state = next_state.to(self.device)     # (batch_size, n_latent)
+        next_hidden = next_hidden.to(self.device)   # (batch_size, obs_size)
+        is_final = is_final.to(self.device)         # (batch_size)
+
         if self.no_gru:
             obs = state
         else:
             obs, _ = self.gru(state, hidden)
-        obs = obs.squeeze(0)
         obs_policy = obs.detach().requires_grad_()
         obs_q1 = obs.detach().requires_grad_()
         obs_q2 = obs.detach().requires_grad_()
@@ -170,7 +177,6 @@ class Agent:
             next_obs = next_state
         else:
             next_obs, _ = self.gru(next_state, next_hidden)
-        next_obs = next_obs.squeeze(0)
         next_action, _, next_log_prob = self.policy.sample(next_obs)
         target_q = torch.min(self.target_qf1(next_action, next_obs), self.target_qf2(next_action, next_obs))
 
@@ -178,32 +184,6 @@ class Agent:
 
         qf1_loss = self.qf_criterion(q1, q_target)
         qf2_loss = self.qf_criterion(q2, q_target)
-
-        out_dict = {
-                "loss/alpha_loss": alpha_loss.item(),
-                "loss/policy_loss": policy_loss.item(),
-                "loss/qf1_loss": qf1_loss.item(),
-                "loss/qf2_loss": qf2_loss.item(),
-                "debug/alpha": alpha.item(),
-                "debug/log_prob": log_prob.mean().item(),
-                "debug/min_q": min_q.mean().item(),
-                "debug/q1": q1.mean().item(),
-                "debug/q2": q2.mean().item(),
-                "debug/reward": reward.mean().item()
-                }
-
-        return alpha_loss, policy_loss, qf1_loss, qf2_loss, out_dict
-
-    def learn(self, state, hidden, action, reward, next_state, next_hidden, is_final, graph=False):
-        state = state.to(self.device)               # (1, batch_size, n_latent)
-        hidden = hidden.to(self.device)             # (1, batch_size, obs_size)
-        action = action.to(self.device)             # (batch_size, n_latent)
-        reward = reward.to(self.device)             # (batch_size)
-        next_state = next_state.to(self.device)     # (1, batch_size, n_latent)
-        next_hidden = next_hidden.to(self.device)   # (1, batch_size, obs_size)
-        is_final = is_final.to(self.device)         # (batch_size)
-
-        alpha_loss, policy_loss, qf1_loss, qf2_loss, out_dict = self.calc_loss(state, hidden, action, reward, next_state, next_hidden, is_final)
 
         # 各パラメータの更新
         self.alpha_opt.zero_grad()
@@ -232,6 +212,19 @@ class Agent:
         for t_p, p in zip(self.target_qf2.parameters(), self.qf2.parameters()):
             t_p.data.copy_(t_p.data * (1.0-self.tau) + p.data * self.tau)
 
+        out_dict = {
+                "loss/alpha_loss": alpha_loss.item(),
+                "loss/policy_loss": policy_loss.item(),
+                "loss/qf1_loss": qf1_loss.item(),
+                "loss/qf2_loss": qf2_loss.item(),
+                "debug/alpha": alpha.item(),
+                "debug/log_prob": log_prob.mean().item(),
+                "debug/min_q": min_q.mean().item(),
+                "debug/q1": q1.mean().item(),
+                "debug/q2": q2.mean().item(),
+                "debug/reward": reward.mean().item()
+                }
+
         if graph:
             losses = {"alpha_loss":alpha_loss, "policy_loss":policy_loss, "qf1_loss":qf1_loss, "qf2_loss":qf2_loss}
         else:
@@ -258,8 +251,8 @@ class Agent:
         else:
             obs, next_hidden = self.gru(state, hidden)
         # obs : (batch_size(1), obs_size)
-        # hidden : (1, batch_size(1), obs_size)
-        action, _, _ = self.policy.sample(obs.squeeze(0))
+        # hidden : (batch_size(1), obs_size)
+        action, _, _ = self.policy.sample(obs)
         return action, next_hidden
 
 
