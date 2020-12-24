@@ -54,6 +54,7 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--num_experiment", type=int, default=10)
     parser.add_argument("--num_epoch", type=int, default=10)
+    parser.add_argument("--training_num", type=int, default=32)
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--discount", type=float, default=0.99)
@@ -61,7 +62,7 @@ if __name__ == "__main__":
     parser.add_argument("--no_gru", action='store_true')
     parser.add_argument("--use_history_hidden", action='store_true')
     parser.add_argument("--activation", choices=["sqrt", "sigmoid", "none", "tanh"], default="none")
-    parser.add_argument("--training_num", type=int, default=32)
+    parser.add_argument("--additional_reward", choices=["none", "bleu", "cos"], default="none")
     args = parser.parse_args()
 
     sp = spm.SentencePieceProcessor(model_file=args.spm_model)
@@ -117,6 +118,9 @@ if __name__ == "__main__":
 
     is_predefined = get_grammra_reward_function()
 
+    if args.additional_reward == "cos":
+        cos = torch.nn.CosineSimilarity(dim=1)
+
     i = 0
     for epoch in range(args.num_epoch):
         if len(memory) > 0:
@@ -165,7 +169,11 @@ if __name__ == "__main__":
         rewards = 0.0
         memory_dict = dict()
         t_memory_dict = dict()
-        utt_list = []
+        if args.additional_reward == "bleu":
+            utt_list = []
+        elif args.additional_reward == "cos":
+            action_list = []
+
         with torch.no_grad():
             state = torch.randn(1, config.n_latent, device=device)
             hidden = torch.zeros(1, obs_size, device=device)
@@ -189,27 +197,47 @@ if __name__ == "__main__":
                 action, next_hidden = agent.act(state, hidden)
                 utt = tester.beam_generate(action, 5)[0]
                 pre = is_predefined(utt)
+                data_dict = {"utterance": utt, "pre": pre}
 
                 t_utt, t_action, t_pre = random.choice(init_data)
 
-                if len(utt) == 0:
-                    bleu = 1
-                elif len(utt_list) > 0:
-                    bleu = bleu_score.sentence_bleu(utt_list, list(utt), smoothing_function=bleu_score.SmoothingFunction().method1, weights=(0.5, 0.5))
-                else:
-                    bleu = 0
+                if args.additional_reward == "none":
+                    reward = pre
+                    t_reward = t_pre
+                elif args.additional_reward == "bleu":
+                    if len(utt) == 0:
+                        bleu = 1
+                    elif len(utt_list) > 0:
+                        bleu = bleu_score.sentence_bleu(utt_list, list(utt), smoothing_function=bleu_score.SmoothingFunction().method1, weights=(0.5, 0.5))
+                    else:
+                        bleu = 0
+                    data_dict["bleu"] = bleu
 
-                if len(t_utt) == 0:
-                    t_bleu = 1
-                elif len(utt_list) > 0:
-                    t_bleu = bleu_score.sentence_bleu(utt_list, list(t_utt), smoothing_function=bleu_score.SmoothingFunction().method1, weights=(0.5, 0.5))
-                else:
-                    t_bleu = 0
+                    if len(t_utt) == 0:
+                        t_bleu = 1
+                    elif len(utt_list) > 0:
+                        t_bleu = bleu_score.sentence_bleu(utt_list, list(t_utt), smoothing_function=bleu_score.SmoothingFunction().method1, weights=(0.5, 0.5))
+                    else:
+                        t_bleu = 0
 
-                if len(utt) > 0:
-                    utt_list.append(list(utt))
-                reward = pre - bleu
-                t_reward = t_pre - t_bleu
+                    if len(utt) > 0:
+                        utt_list.append(list(utt))
+                    reward = pre - bleu
+                    t_reward = t_pre - t_bleu
+                elif args.additional_reward == "cos":
+                    if len(action_list) > 0:
+                        x1 = torch.cat(action_list, dim=0)
+                        x2 = action.expand_as(x1)
+                        xt = t_action.expand_as(x1)
+                        cs = cos(x1, x2).mean().item() / 2 + 0.5
+                        t_cs = cos(x1, xt).mean().item() / 2 + 0.5
+                    else:
+                        cs = 0
+                        t_cs = 0
+                    data_dict["cos"] = cs
+                    reward = pre - cs
+                    t_reward = t_pre - t_cs
+
 
                 # エージェントの出力行動
                 memory_dict["state"] = state.detach().cpu()
@@ -226,7 +254,7 @@ if __name__ == "__main__":
                 t_state = t_action.detach()
 
                 hidden = next_hidden.detach()
-                data.append({"utterance":utt, "reward":reward, "bleu":bleu, "pre": pre})
+                data.append(data_dict)
                 rewards += reward
 
             # エージェントの出力行動

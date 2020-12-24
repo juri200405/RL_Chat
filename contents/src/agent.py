@@ -160,7 +160,7 @@ class Agent:
         else:
             obs = self.gru(state, hidden)
             if not use_history_hidden:
-                next_hidden = obs
+                next_hidden = obs.detach()
         obs_policy = obs.detach().requires_grad_()
         obs_q1 = obs.detach().requires_grad_()
         obs_q2 = obs.detach().requires_grad_()
@@ -233,7 +233,7 @@ class Agent:
         else:
             losses = None
 
-        return next_hidden.detach(), out_dict, losses
+        return next_hidden, out_dict, losses
 
     def train(self):
         self.gru.train()
