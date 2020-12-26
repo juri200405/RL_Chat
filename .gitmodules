@@ -1,0 +1,3 @@
+[submodule "contents/torchviz"]
+	path = contents/torchviz
+	url = https://github.com/juri200405/pytorchviz.git

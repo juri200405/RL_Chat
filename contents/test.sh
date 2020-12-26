@@ -2,10 +2,9 @@
 
 ~/conda/envs/pl/bin/python src/chat_main.py \
 	-s data/tomioka/telegram_setting.json \
-	-m data/tomioka/spm_model/no_kwdlc.model \
-	-o data/tomioka/output/rl_chat/2020_12_08 \
-	--vae_checkpoint data/tomioka/output/transformer_vae/2020_12_02/2/5160k.pt \
-	--database data/tomioka/database2.json \
+	-o data/tomioka/output/rl_chat/2020_12_11 \
+	--dbdc_checkpoint data/tomioka/output/dbdc/2020_12_10/13/epoch063.pt \
 	--batch_size 64 \
 	--sample_size 512 \
-	--telegram
+	# --telegram
+	# --database data/tomioka/database2.json \
