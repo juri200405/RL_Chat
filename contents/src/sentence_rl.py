@@ -52,6 +52,7 @@ if __name__ == "__main__":
     parser.add_argument("--spm_model", required=True)
     parser.add_argument("--grammar_data", default=None)
     parser.add_argument("--output_dir", required=True)
+    parser.add_argument("--mid_size", type=int, default=1024)
     parser.add_argument("--num_experiment", type=int, default=10)
     parser.add_argument("--num_epoch", type=int, default=10)
     parser.add_argument("--training_num", type=int, default=32)
@@ -97,6 +98,7 @@ if __name__ == "__main__":
             activation_function,
             config.n_latent,
             obs_size,
+            args.mid_size,
             device,
             lr=args.lr,
             discount=args.discount,
@@ -185,7 +187,7 @@ if __name__ == "__main__":
         with torch.no_grad():
             state = torch.randn(1, config.n_latent, device=device)
             hidden = torch.zeros(1, obs_size, device=device)
-            for _ in range(args.num_experiment):
+            for step in range(args.num_experiment):
                 # エージェントの出力行動
                 if "state" in memory_dict:
                     memory_dict["next_state"] = state.detach().cpu()
@@ -206,7 +208,7 @@ if __name__ == "__main__":
                 action, next_hidden = agent.act(state, hidden)
                 utt = tester.beam_generate(action, 5)[0]
                 pre = is_predefined(utt)
-                data_dict = {"utterance": utt, "pre": pre}
+                data_dict = {"utterance": utt, "pre": pre, "epoch": epoch, "step": step}
 
                 if use_memory:
                     t_utt, t_action, t_pre = random.choice(init_data)
@@ -257,12 +259,13 @@ if __name__ == "__main__":
 
                 elif args.additional_reward == "state_action_cos":
                     cs = cos(state, action).item() / 2 + 0.5
-                    reward = (pre + cs) - 1.0
+                    reward = (1.3 * pre + 0.7 * cs) - 1.0
                     data_dict["cos"] = cs
                     if use_memory:
                         t_cs = cos(state, t_action).item() / 2 + 0.5
-                        t_reward = (tpre + t_cs) - 1.0
+                        t_reward = (1.3 * t_pre + 0.7 * t_cs) - 1.0
 
+                data_dict["reward"] = reward
                 # エージェントの出力行動
                 memory_dict["state"] = state.detach().cpu()
                 memory_dict["hidden"] = hidden.detach().cpu()

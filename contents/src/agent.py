@@ -75,6 +75,7 @@ class Agent:
             activation,
             n_latent,
             obs_size,
+            mid_size,
             device,
             lr=1e-3,
             target_entropy=-128,
@@ -86,11 +87,11 @@ class Agent:
         self.device = device
 
         self.gru = nn.GRUCell(input_size=n_latent, hidden_size=obs_size)
-        self.policy = Policy_network(obs_size=obs_size, output_size=n_latent)
-        self.qf1 = Q_network(activation, obs_size=obs_size, action_size=n_latent)
-        self.qf2 = Q_network(activation, obs_size=obs_size, action_size=n_latent)
-        self.target_qf1 = Q_network(activation, obs_size=obs_size, action_size=n_latent)
-        self.target_qf2 = Q_network(activation, obs_size=obs_size, action_size=n_latent)
+        self.policy = Policy_network(obs_size=obs_size, output_size=n_latent, mid_size=mid_size)
+        self.qf1 = Q_network(activation, obs_size=obs_size, action_size=n_latent, mid_size=mid_size)
+        self.qf2 = Q_network(activation, obs_size=obs_size, action_size=n_latent, mid_size=mid_size)
+        self.target_qf1 = Q_network(activation, obs_size=obs_size, action_size=n_latent, mid_size=mid_size)
+        self.target_qf2 = Q_network(activation, obs_size=obs_size, action_size=n_latent, mid_size=mid_size)
         self.log_alpha = torch.tensor([initial_log_alpha], requires_grad=True, device=device)
 
         self.qf_criterion = nn.MSELoss()
@@ -169,9 +170,11 @@ class Agent:
 
         alpha_loss = -(self.log_alpha * (log_prob + self.target_entropy).detach()).mean()
         alpha = torch.exp(self.log_alpha)
+        # alpha_loss = (-alpha * (log_prob + self.target_entropy).detach()).mean()
 
         min_q = torch.min(self.qf1(new_obs_action, obs_policy), self.qf2(new_obs_action, obs_policy))
         policy_loss = (alpha * log_prob - min_q).mean()
+        # policy_loss = (alpha.detach() * log_prob - min_q).mean()
 
         q1 = self.qf1(action, obs_q1)
         q2 = self.qf2(action, obs_q2)
