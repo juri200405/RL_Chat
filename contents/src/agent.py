@@ -42,6 +42,7 @@ class Policy_network(nn.Module):
         self.mid2mean = torch.nn.Linear(mid_size, output_size)
         self.mid2logv = torch.nn.Linear(mid_size, output_size)
         self.relu = torch.nn.LeakyReLU()
+        self.tanh = torch.nn.Tanh()
 
     def forward(self, obs):
         policy = self.relu(self.fc(obs))
@@ -49,7 +50,7 @@ class Policy_network(nn.Module):
         log_std = self.mid2logv(policy)
 
         log_std = torch.clamp(log_std, min=self.LOG_STD_MIN, max=self.LOG_STD_MAX)
-        std = torch.exp(log_std)
+        std = log_std.exp()
 
         return mean, std # (batch_size, action_size)
 
@@ -57,17 +58,29 @@ class Policy_network(nn.Module):
         # obs : (batch_size, state_size)
         mean, std = self.forward(obs)
         m = MultivariateNormal(mean, torch.diag_embed(std))
-        action = m.rsample()
-        log_prob = m.log_prob(action)
+        xs = m.rsample()
+        action = self.tanh(xs)
+        log_prob = self.log_prob(xs, m)
 
-        return action, mean, log_prob # (batch_size, action_size)
+        return action, log_prob # (batch_size, action_size)
 
     def get_log_prob(self, obs, action):
         mean, std = self.forward(obs)
         m = MultivariateNormal(mean, torch.diag_embed(std))
-        log_prob = m.log_prob(action)
+        val = torch.clamp(action, -0.999999, 0.999999)
+        val = torch.log(1+val) / 2 - torch.log(1-val) / 2
+        log_prob = self.log_prob(val, m)
 
-        return action, mean, log_prob
+        return action, log_prob
+
+    def log_prob(self, val, m):
+        log_prob = m.log_prob(val)
+        correction = -2.0 * (
+                torch.tensor([2.0], device=val.device).log()
+                - val
+                - torch.nn.functional.softplus(-2.0 * val)
+                ).sum(dim=1)
+        return log_prob + correction
 
 class Agent:
     def __init__(
@@ -166,7 +179,7 @@ class Agent:
         obs_q1 = obs.detach().requires_grad_()
         obs_q2 = obs.detach().requires_grad_()
 
-        new_obs_action, _, log_prob = self.policy.sample(obs_policy)
+        new_obs_action, log_prob = self.policy.sample(obs_policy)
 
         alpha_loss = -(self.log_alpha * (log_prob + self.target_entropy).detach()).mean()
         alpha = torch.exp(self.log_alpha)
@@ -183,7 +196,7 @@ class Agent:
             next_obs = next_state
         else:
             next_obs = self.gru(next_state, next_hidden)
-        next_action, _, next_log_prob = self.policy.sample(next_obs)
+        next_action, next_log_prob = self.policy.sample(next_obs)
         target_q = torch.min(self.target_qf1(next_action, next_obs), self.target_qf2(next_action, next_obs))
 
         q_target = (reward + (1 - is_final) * self.discount * (target_q - alpha*next_log_prob)).detach()
@@ -259,7 +272,7 @@ class Agent:
             next_hidden = obs
         # obs : (batch_size(1), obs_size)
         # hidden : (batch_size(1), obs_size)
-        action, _, _ = self.policy.sample(obs)
+        action, _ = self.policy.sample(obs)
         return action, next_hidden
 
 
