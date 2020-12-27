@@ -43,7 +43,7 @@ class transformer_Encoder(nn.Module):
         self.fc = nn.Linear(config.max_len * config.d_model, config.mlp_n_hidden)
         self.memory2mean = nn.Linear(config.mlp_n_hidden, config.n_latent)
         self.memory2logv = nn.Linear(config.mlp_n_hidden, config.n_latent)
-        # self.tanh = nn.Tanh()
+        self.tanh = nn.Tanh()
         self.relu = nn.LeakyReLU()
 
     def reparameterize(self, mu, logvar):
@@ -75,7 +75,7 @@ class transformer_Encoder(nn.Module):
         # return m, z
 
         z = self.reparameterize(mean, logv)
-        return z
+        return self.tanh(z)
 
 class transformer_Decoder(nn.Module):
     def __init__(self, config, embedding, norm=None):
