@@ -16,25 +16,114 @@ from config import Config
 from agent import Agent
 from dataloader import get_dataloader
 
-def get_grammra_reward_function():
-    repeatedly = re.compile(r"(.+)\1{3}")
-    head = re.compile(r"^[,ぁァぃィぅゥぇェぉォヵヶゃャゅュょョゎヮ」』ー)]")
-    left = re.compile(r"[「『(]")
-    right = re.compile(r"[」』)]")
+class Environment():
+    def __init__(self, tester, additional_reward, init_data=None, manual_reward=False):
+        self.history_list = []
+        self.tester = tester
 
-    def _function(utt):
+        self.repeatedly = re.compile(r"(.+)\1{3}")
+        self.head = re.compile(r"^[,ぁァぃィぅゥぇェぉォヵヶゃャゅュょョゎヮ」』ー)]")
+        self.left = re.compile(r"[「『(]")
+        self.right = re.compile(r"[」』)]")
+
+        self.additional_reward = additional_reward
+        if additional_reward in ["cos", "state_action_cos"]:
+            self.cos = torch.nn.CosineSimilarity(dim=1)
+
+        self.manual_reward = manual_reward
+
+        self.use_memory = init_data is not None
+        self.init_data = init_data
+
+    def reset(self):
+        self.history_list.clear()
+
+    def _reward(self, utt):
         if len(utt.strip()) == 0:
             return 0.0
-        if repeatedly.search(utt) is not None:
+        if self.repeatedly.search(utt) is not None:
             return 0.0
-        if head.match(utt) is not None:
+        if self.head.match(utt) is not None:
             return 0.0
-        if len(left.findall(utt)) != len(right.findall(utt)):
+        if len(self.left.findall(utt)) != len(self.right.findall(utt)):
             return 0.0
 
-        return 1.0
+        if self.manual_reward:
+            print(utt)
+            r = -1.0
+            while r < 0 or r > 1:
+                try:
+                    r = float(input("reward (0 <= r <= 1) : "))
+                except ValueError:
+                    print("try again")
+            return r
+        else:
+            return 1.0
 
-    return _function
+    def calc_reward(self, state, action):
+        utt = self.tester.beam_generate(action, 5)[0]
+        pre = self._reward(utt)
+        data_dict = {"utterance": utt, "pre": pre, "epoch": epoch, "step": step}
+        t_reward = None
+
+        if self.use_memory:
+            t_utt, t_action, t_pre = random.choice(self.init_data)
+
+        if self.additional_reward == "none":
+            reward = pre
+            if self.use_memory:
+                t_reward = t_pre
+
+        elif self.additional_reward == "bleu":
+            if len(utt) == 0:
+                bleu = 1
+            elif len(self.history_list) > 0:
+                bleu = bleu_score.sentence_bleu(self.utt_list, list(utt), smoothing_function=bleu_score.SmoothingFunction().method1, weights=(0.5, 0.5))
+            else:
+                bleu = 0
+            data_dict["bleu"] = bleu
+            reward = pre - bleu
+
+            if self.use_memory:
+                if len(t_utt) == 0:
+                    t_bleu = 1
+                elif len(self.history_list) > 0:
+                    t_bleu = bleu_score.sentence_bleu(self.utt_list, list(t_utt), smoothing_function=bleu_score.SmoothingFunction().method1, weights=(0.5, 0.5))
+                else:
+                    t_bleu = 0
+                t_reward = t_pre - t_bleu
+
+            if len(utt) > 0:
+                self.history_list.append(list(utt))
+
+        elif self.additional_reward == "cos":
+            if len(self.history_list) > 0:
+                x1 = torch.cat(self.history_list, dim=0)
+                x2 = action.expand_as(x1)
+                cs = self.cos(x1, x2).mean().item() / 2 + 0.5
+                if self.use_memory:
+                    xt = t_action.expand_as(x1)
+                    t_cs = self.cos(x1, xt).mean().item() / 2 + 0.5
+            else:
+                cs = 0
+                if self.use_memory:
+                    t_cs = 0
+            data_dict["cos"] = cs
+            reward = pre - cs
+            if self.use_memory:
+                t_reward = t_pre - t_cs
+            self.history_list.append(action.detach())
+
+        elif self.additional_reward == "state_action_cos":
+            cs = self.cos(state, action).item() / 2 + 0.5
+            reward = (1.3 * pre + 0.7 * cs) - 1.0
+            data_dict["cos"] = cs
+            if self.use_memory:
+                t_cs = cos(state, t_action).item() / 2 + 0.5
+                t_reward = (1.3 * t_pre + 0.7 * t_cs) - 1.0
+
+        data_dict["reward"] = reward
+        return data_dict, t_reward
 
 
 def sqrt_activation(x):
@@ -63,15 +152,16 @@ if __name__ == "__main__":
     parser.add_argument("--no_gru", action='store_true')
     parser.add_argument("--use_history_hidden", action='store_true')
     parser.add_argument("--random_state", action='store_true')
+    parser.add_argument("--manual_reward", action='store_true')
     parser.add_argument("--activation", choices=["sqrt", "sigmoid", "none", "tanh"], default="none")
     parser.add_argument("--additional_reward", choices=["none", "bleu", "cos", "state_action_cos"], default="none")
     args = parser.parse_args()
 
-    sp = spm.SentencePieceProcessor(model_file=args.spm_model)
-    print("complete loading spm_model")
-
     writer = SummaryWriter(log_dir=args.output_dir)
     print("complete making writer")
+
+    sp = spm.SentencePieceProcessor(model_file=args.spm_model)
+    print("complete loading spm_model")
 
     config = Config()
     config.load_json(str(Path(args.vae_checkpoint).with_name("hyper_param.json")))
@@ -120,14 +210,12 @@ if __name__ == "__main__":
         init_data = [(item["utterance"], tester.encode(item["utterance"]), item["grammar"]) for item in init_data]
     else:
         use_memory = False
+        init_data = None
+
+    env = Environment(tester, args.additional_reward, init_data, args.manual_reward)
 
     data = []
     memory = []
-
-    is_predefined = get_grammra_reward_function()
-
-    if args.additional_reward in ["cos", "state_action_cos"]:
-        cos = torch.nn.CosineSimilarity(dim=1)
 
     i = 0
     for epoch in range(args.num_epoch):
@@ -179,11 +267,6 @@ if __name__ == "__main__":
         if use_memory:
             t_memory_dict = dict()
 
-        if args.additional_reward == "bleu":
-            utt_list = []
-        elif args.additional_reward == "cos":
-            action_list = []
-
         with torch.no_grad():
             state = torch.randn(1, config.n_latent, device=device)
             hidden = torch.zeros(1, obs_size, device=device)
@@ -206,71 +289,13 @@ if __name__ == "__main__":
                         t_memory_dict = dict()
 
                 action, next_hidden = agent.act(state, hidden)
-                utt = tester.beam_generate(action, 5)[0]
-                pre = is_predefined(utt)
-                data_dict = {"utterance": utt, "pre": pre, "epoch": epoch, "step": step}
+                data_dict, t_reward = env.calc_reward(state, action)
 
-                if use_memory:
-                    t_utt, t_action, t_pre = random.choice(init_data)
-
-                if args.additional_reward == "none":
-                    reward = pre
-                    if use_memory:
-                        t_reward = t_pre
-
-                elif args.additional_reward == "bleu":
-                    if len(utt) == 0:
-                        bleu = 1
-                    elif len(utt_list) > 0:
-                        bleu = bleu_score.sentence_bleu(utt_list, list(utt), smoothing_function=bleu_score.SmoothingFunction().method1, weights=(0.5, 0.5))
-                    else:
-                        bleu = 0
-                    data_dict["bleu"] = bleu
-                    reward = pre - bleu
-
-                    if use_memory:
-                        if len(t_utt) == 0:
-                            t_bleu = 1
-                        elif len(utt_list) > 0:
-                            t_bleu = bleu_score.sentence_bleu(utt_list, list(t_utt), smoothing_function=bleu_score.SmoothingFunction().method1, weights=(0.5, 0.5))
-                        else:
-                            t_bleu = 0
-                        t_reward = t_pre - t_bleu
-
-                    if len(utt) > 0:
-                        utt_list.append(list(utt))
-
-                elif args.additional_reward == "cos":
-                    if len(action_list) > 0:
-                        x1 = torch.cat(action_list, dim=0)
-                        x2 = action.expand_as(x1)
-                        cs = cos(x1, x2).mean().item() / 2 + 0.5
-                        if use_memory:
-                            xt = t_action.expand_as(x1)
-                            t_cs = cos(x1, xt).mean().item() / 2 + 0.5
-                    else:
-                        cs = 0
-                        if use_memory:
-                            t_cs = 0
-                    data_dict["cos"] = cs
-                    reward = pre - cs
-                    if use_memory:
-                        t_reward = t_pre - t_cs
-
-                elif args.additional_reward == "state_action_cos":
-                    cs = cos(state, action).item() / 2 + 0.5
-                    reward = (1.3 * pre + 0.7 * cs) - 1.0
-                    data_dict["cos"] = cs
-                    if use_memory:
-                        t_cs = cos(state, t_action).item() / 2 + 0.5
-                        t_reward = (1.3 * t_pre + 0.7 * t_cs) - 1.0
-
-                data_dict["reward"] = reward
                 # エージェントの出力行動
                 memory_dict["state"] = state.detach().cpu()
                 memory_dict["hidden"] = hidden.detach().cpu()
                 memory_dict["action"] = action.detach().cpu()
-                memory_dict["reward"] = torch.tensor([reward])
+                memory_dict["reward"] = torch.tensor([data_dict["reward"]])
 
                 if use_memory:
                     # メモリからの行動
@@ -290,7 +315,7 @@ if __name__ == "__main__":
 
                 hidden = next_hidden.detach()
                 data.append(data_dict)
-                rewards += reward
+                rewards += data_dict["reward"]
 
             # エージェントの出力行動
             memory_dict["next_state"] = state.cpu()
