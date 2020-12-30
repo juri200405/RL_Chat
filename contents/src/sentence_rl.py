@@ -15,9 +15,10 @@ from vae_check import VAE_tester
 from config import Config
 from agent import Agent
 from dataloader import get_dataloader
+from is_in_corpus import MyModel
 
 class Environment():
-    def __init__(self, tester, additional_reward, init_data=None, manual_reward=False):
+    def __init__(self, tester, additional_reward, init_data=None, manual_reward=False, reward_model=None):
         self.history_list = []
         self.tester = tester
 
@@ -31,6 +32,7 @@ class Environment():
             self.cos = torch.nn.CosineSimilarity(dim=1)
 
         self.manual_reward = manual_reward
+        self.reward_model = reward_model
 
         self.use_memory = init_data is not None
         self.init_data = init_data
@@ -62,8 +64,12 @@ class Environment():
 
     def calc_reward(self, state, action):
         utt = self.tester.beam_generate(action, 5)[0]
-        pre = self._reward(utt)
+        if self.reward_model is not None:
+            pre = self.reward_model(action).item()
+        else:
+            pre = self._reward(utt)
         data_dict = {"utterance": utt, "pre": pre, "epoch": epoch, "step": step}
+        t_action = None
         t_reward = None
 
         if self.use_memory:
@@ -119,11 +125,11 @@ class Environment():
             reward = (1.3 * pre + 0.7 * cs) - 1.0
             data_dict["cos"] = cs
             if self.use_memory:
-                t_cs = cos(state, t_action).item() / 2 + 0.5
+                t_cs = self.cos(state, t_action).item() / 2 + 0.5
                 t_reward = (1.3 * t_pre + 0.7 * t_cs) - 1.0
 
         data_dict["reward"] = reward
-        return data_dict, t_reward
+        return data_dict, t_action, t_reward
 
 
 def sqrt_activation(x):
@@ -138,6 +144,7 @@ def none_activation(x):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--vae_checkpoint", required=True)
+    parser.add_argument("--reward_checkpoint", required=True)
     parser.add_argument("--spm_model", required=True)
     parser.add_argument("--grammar_data", default=None)
     parser.add_argument("--output_dir", required=True)
@@ -212,7 +219,10 @@ if __name__ == "__main__":
         use_memory = False
         init_data = None
 
-    env = Environment(tester, args.additional_reward, init_data, args.manual_reward)
+    reward_model = MyModel(config.n_latent, 2048).to(device)
+    reward_model.eval()
+    reward_model.load_state_dict(torch.load(args.reward_checkpoint, map_location=device))
+    env = Environment(tester, args.additional_reward, init_data, args.manual_reward, reward_model)
 
     data = []
     memory = []
@@ -268,7 +278,7 @@ if __name__ == "__main__":
             t_memory_dict = dict()
 
         with torch.no_grad():
-            state = torch.randn(1, config.n_latent, device=device)
+            state = torch.randn(1, config.n_latent, device=device).tanh()
             hidden = torch.zeros(1, obs_size, device=device)
             for step in range(args.num_experiment):
                 # エージェントの出力行動
@@ -289,7 +299,7 @@ if __name__ == "__main__":
                         t_memory_dict = dict()
 
                 action, next_hidden = agent.act(state, hidden)
-                data_dict, t_reward = env.calc_reward(state, action)
+                data_dict, t_action, t_reward = env.calc_reward(state, action)
 
                 # エージェントの出力行動
                 memory_dict["state"] = state.detach().cpu()
@@ -305,9 +315,9 @@ if __name__ == "__main__":
                     t_memory_dict["reward"] = torch.tensor([t_reward])
 
                 if args.random_state:
-                    state = torch.randn_like(state)
+                    state = torch.randn_like(state).tanh()
                     if use_memory:
-                        t_state = torch.randn_like(state)
+                        t_state = torch.randn_like(state).tanh()
                 else:
                     state = action.detach()
                     if use_memory:
@@ -331,6 +341,7 @@ if __name__ == "__main__":
                 memory.append(t_memory_dict)
 
             writer.add_scalar("experiment/total_reward", rewards, epoch)
+            env.reset()
 
         torch.save(agent.state_dict(), str(Path(args.output_dir)/"epoch{:04d}.pt".format(epoch)))
 

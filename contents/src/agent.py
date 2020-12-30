@@ -18,7 +18,7 @@ class Q_network(nn.Module):
     def __init__(self, activation, obs_size=1024, action_size=1024, mid_size=1024):
         super(Q_network, self).__init__()
         self.fc1 = nn.Linear(obs_size+action_size, mid_size)
-        self.fc2 = nn.Linear(mid_size, 1, bias=False)
+        self.fc2 = nn.Linear(mid_size, 1)
         self.relu = torch.nn.LeakyReLU()
         self.activation = activation
 
