@@ -144,9 +144,9 @@ def none_activation(x):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--vae_checkpoint", required=True)
-    parser.add_argument("--reward_checkpoint", required=True)
     parser.add_argument("--spm_model", required=True)
     parser.add_argument("--grammar_data", default=None)
+    parser.add_argument("--reward_checkpoint", default=None)
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--mid_size", type=int, default=1024)
     parser.add_argument("--num_experiment", type=int, default=10)
@@ -219,9 +219,12 @@ if __name__ == "__main__":
         use_memory = False
         init_data = None
 
-    reward_model = MyModel(config.n_latent, 2048).to(device)
-    reward_model.eval()
-    reward_model.load_state_dict(torch.load(args.reward_checkpoint, map_location=device))
+    if args.reward_checkpoint is not None:
+        reward_model = MyModel(config.n_latent, 2048).to(device)
+        reward_model.eval()
+        reward_model.load_state_dict(torch.load(args.reward_checkpoint, map_location=device))
+    else:
+        reward_model = None
     env = Environment(tester, args.additional_reward, init_data, args.manual_reward, reward_model)
 
     data = []
