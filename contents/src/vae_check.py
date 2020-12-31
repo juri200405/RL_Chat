@@ -129,5 +129,5 @@ if __name__ == "__main__":
         output_text = "\n{}\n-> {}\n".format(input_sentence, output_sentence)
         print(output_text)
 
-    memorys = torch.randn(20, config.n_latent)
+    memorys = torch.randn(20, config.n_latent).tanh()
     print("\n".join(tester.generate(memorys)))
