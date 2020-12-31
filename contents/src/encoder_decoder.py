@@ -5,6 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import MultivariateNormal
 
+from transformers import BertModel
+
 class Transformer_Embedding(nn.Module):
     def __init__(self, config):
         super(Transformer_Embedding, self).__init__()
@@ -108,3 +110,44 @@ class transformer_Decoder(nn.Module):
         mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
         mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
         return mask
+
+class bert_Encoder(nn.Module):
+    def __init__(self, config, bert_path):
+        super(bert_Encoder, self).__init__()
+        self.bert = BertModel.from_pretrained(bert_path)
+
+        self.fc = nn.Linear(config.max_len * self.bert.config.hidden_size, config.mlp_n_hidden)
+        self.memory2mean = nn.Linear(config.mlp_n_hidden, config.n_latent)
+        self.memory2logv = nn.Linear(config.mlp_n_hidden, config.n_latent)
+        self.tanh = nn.Tanh()
+        self.relu = nn.LeakyReLU()
+
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5*logvar)
+        eps = torch.randn_like(std)
+        return mu + eps*std
+
+    def forward(self, src, attention_mask=None):
+        # src : (batch_size, seq_len)
+
+        with torch.no_grad():
+            mask = torch.where(attention_mask, 0.0, 1.0)
+            out = self.bert(src, attention_mask=mask).last_hidden_state
+        # out = (batch_size, seq_len, d_model)
+        out = torch.reshape(out, (out.shape[0], -1))
+
+        memory = self.relu(self.fc(out))
+        mean = self.memory2mean(memory)
+
+        # return mean
+
+        # logv = self.tanh(self.memory2logv(memory))
+        logv = self.memory2logv(memory)
+
+        # v = torch.diag_embed(logv.exp())
+        # m = MultivariateNormal(mean, covariance_matrix=v)
+        # z = m.rsample()
+        # return m, z
+
+        z = self.reparameterize(mean, logv)
+        return self.tanh(z)
