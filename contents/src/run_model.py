@@ -16,7 +16,7 @@ import sentencepiece as spm
 # from torchviz import make_dot
 
 from bert_dataloader import get_dataloader
-from encoder_decoder import transformer_Decoder, Transformer_Embedding, transformer_Encoder
+from encoder_decoder import transformer_Decoder, Transformer_Embedding, transformer_Encoder, bert_Encoder
 from config import Config
 from losses import VaeLoss, MmdLoss
 
@@ -32,6 +32,11 @@ class Trainer:
         self.config.load_json(args.hyper_param)
         self.config.n_vocab = len(self.sp)
 
+        if args.encoder_gpu < 0:
+            self.encoder_device = self.config.device
+        else:
+            self.encoder_device = torch.device("cuda", args.encoder_gpu)
+
         print(args.output_dir)
         print("device = {}".format(self.config.device))
 
@@ -39,6 +44,10 @@ class Trainer:
             embedding_model = Transformer_Embedding(self.config)
             self.encoder = transformer_Encoder(self.config, embedding_model, nn.LayerNorm(self.config.d_model))
             # self.encoder = transformer_Encoder(self.config, Transformer_Embedding(self.config), nn.LayerNorm(self.config.d_model))
+        elif self.config.model_type == "bert" and args.bert_path is not None:
+            embedding_model = None
+            self.encoder = bert_Encoder(self.config, args.bert_path)
+            self.config.d_model = self.encoder.bert.config.hidden_size
         else:
             print("model_type missmatch")
             exit()
@@ -55,10 +64,12 @@ class Trainer:
         self.loss_func = MmdLoss(nn.CrossEntropyLoss(ignore_index=3, reduction='mean'), self.config).forward
         self.config.save_json(str(self.output_dir / "hyper_param.json"))
 
-        self.decoder = transformer_Decoder(self.config, embedding_model, nn.LayerNorm(self.config.d_model))
-        # self.decoder = transformer_Decoder(self.config, Transformer_Embedding(self.config), nn.LayerNorm(self.config.d_model))
+        if embedding_model is None:
+            self.decoder = transformer_Decoder(self.config, Transformer_Embedding(self.config), nn.LayerNorm(self.config.d_model))
+        else:
+            self.decoder = transformer_Decoder(self.config, embedding_model, nn.LayerNorm(self.config.d_model))
 
-        self.encoder.to(self.config.device)
+        self.encoder.to(self.encoder_device)
         self.decoder.to(self.config.device)
 
 
@@ -115,14 +126,14 @@ class Trainer:
         tgt = sentence[:,:]
         label = sentence[:,1:]
 
-        inputs = inputs.to(self.config.device)
+        inputs = inputs.to(self.encoder_device)
         tgt = tgt.to(self.config.device)
         label = label.to(self.config.device)
-        padding_mask = padding_mask.to(self.config.device)
 
-        # m, memory = encoder(inputs, attention_mask=padding_mask)
-        memory = self.encoder(inputs, attention_mask=padding_mask)
-        out = self.decoder(tgt, memory, tgt_padding_mask=padding_mask)
+        memory = self.encoder(inputs, attention_mask=padding_mask.to(self.encoder_device))
+        if self.encoder_device != self.config.device:
+            memory = memory.to(self.config.device)
+        out = self.decoder(tgt, memory, tgt_padding_mask=padding_mask.to(self.config.device))
         # make_dot(out).render(str(self.output_dir + "graph"))
 
         out = out[:-1].contiguous().view(-1, out.shape[-1])
@@ -224,15 +235,15 @@ class Trainer:
             self.writer.add_embedding(memorys, metadata=sentences, global_step=self.num_val)
 
             data = random.choice(self.val_dataset)
-            input_s = torch.tensor([1] + data + [2], device=self.config.device).unsqueeze(0)
-            inp_mask = torch.tensor([[False]*input_s.shape[1] + [True]*(self.config.max_len - input_s.shape[1])], device=self.config.device)
-            pad = torch.full((1, self.config.max_len - input_s.shape[1]), 3, dtype=torch.long, device=self.config.device)
+            input_s = torch.tensor([1] + data + [2], device=self.encoder_device).unsqueeze(0)
+            inp_mask = torch.tensor([[False]*input_s.shape[1] + [True]*(self.config.max_len - input_s.shape[1])], device=self.encoder_device)
+            pad = torch.full((1, self.config.max_len - input_s.shape[1]), 3, dtype=torch.long, device=self.encoder_device)
             input_s = torch.cat((input_s, pad), dim=1)
             # _, memory = self.encoder(input_s, attention_mask=inp_mask)
             memory = self.encoder(input_s, attention_mask=inp_mask)
 
-        ids = self.generate_sentence(memory)
-        rand_ids = self.generate_sentence(torch.randn(1, self.config.n_latent, device=self.config.device))
+            ids = self.generate_sentence(memory.to(self.config.device))
+            rand_ids = self.generate_sentence(torch.randn(1, self.config.n_latent, device=self.config.device))
 
         self.num_val += 1
         return data, ids[0], rand_ids[0]
@@ -261,6 +272,8 @@ if __name__ == "__main__":
     parser.add_argument("-o", "--output_dir", required=True)
     parser.add_argument("-l", "--log_dir", required=True)
     parser.add_argument("-p", "--hyper_param", required=True)
+    parser.add_argument("--encoder_gpu", type=int, default=-1)
+    parser.add_argument("--bert_path", default=None)
     parser.add_argument("--pt_file")
     args = parser.parse_args()
 
