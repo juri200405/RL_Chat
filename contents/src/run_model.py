@@ -131,7 +131,8 @@ class Trainer:
         label = label.to(self.config.device)
 
         memory = self.encoder(inputs, attention_mask=padding_mask.to(self.encoder_device))
-        memory = memory.to(self.config.device)
+        if self.encoder_device != self.config.device:
+            memory = memory.to(self.config.device)
         out = self.decoder(tgt, memory, tgt_padding_mask=padding_mask.to(self.config.device))
         # make_dot(out).render(str(self.output_dir + "graph"))
 
