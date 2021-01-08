@@ -22,6 +22,7 @@ if __name__ == "__main__":
         exit()
 
     ngram_list = [[tuple(sentence[i:i+args.n_gram]) for i in range(len(sentence)+1 - args.n_gram)] for sentence in tqdm.tqdm(datas)]
+    del datas
     n_grams = {item for sentence in ngram_list for item in sentence}
     ngram2id = {item:i for i, item in enumerate(n_grams)}
 
