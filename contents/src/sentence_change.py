@@ -31,7 +31,7 @@ class Environment():
             self.max_ngrams = max(corpus_ngram.values())
 
         self.additional_reward = additional_reward
-        if additional_reward == "state_action_cos":
+        if additional_reward in ["pos_state_action_cos", "neg_state_action_cos"]:
             self.cos = torch.nn.CosineSimilarity(dim=1)
 
     def reset(self):
@@ -89,7 +89,11 @@ class Environment():
                 bleu = bleu_score.sentence_bleu([list(input_utt)], list(utt), smoothing_function=bleu_score.SmoothingFunction().method1, weights=(0.5, 0.5))
             data_dict["bleu"] = bleu
             reward = pre - bleu
-        elif self.additional_reward == "state_action_cos":
+        elif self.additional_reward == "pos_state_action_cos":
+            cs = self.cos(state, action).item() / 2 + 0.5
+            data_dict["cos"] = cs
+            reward = 0.5*pre + 0.5*cs
+        elif self.additional_reward == "neg_state_action_cos":
             cs = self.cos(state, action).item() / 2 + 0.5
             data_dict["cos"] = cs
             reward = pre - cs
@@ -125,7 +129,7 @@ if __name__ == "__main__":
     parser.add_argument("--initial_log_alpha", type=float, default=1e-4)
     parser.add_argument("--activation", choices=["sqrt", "sigmoid", "none", "tanh"], default="none")
     parser.add_argument("--reward_type", choices=["manual", "reward_model", "corpus_ngram", "weighted_corpus_ngram"], default="corpus_ngram")
-    parser.add_argument("--additional_reward", choices=["none", "state_action_id_bleu", "state_action_char_bleu", "state_action_cos"], default="none")
+    parser.add_argument("--additional_reward", choices=["none", "state_action_id_bleu", "state_action_char_bleu", "pos_state_action_cos", "neg_state_action_cos"], default="none")
     args = parser.parse_args()
 
     writer = SummaryWriter(log_dir=args.output_dir)
@@ -274,9 +278,6 @@ if __name__ == "__main__":
             env.reset()
 
         torch.save(agent.state_dict(), str(Path(args.output_dir)/"epoch{:05d}.pt".format(epoch)))
-        if epoch % 100 == 0:
-            with open(str(Path(args.output_dir)/"history_{:05d}.json".format(epoch)), "wt", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-
-    with open(str(Path(args.output_dir)/"history.json"), "wt", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        with open(str(Path(args.output_dir)/"history_{:05d}.json".format(epoch)), "wt", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        data.clear()
