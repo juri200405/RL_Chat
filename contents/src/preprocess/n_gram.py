@@ -4,6 +4,8 @@ from pathlib import Path
 
 import tqdm
 
+import torch
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--inputfile", required=True)
@@ -19,16 +21,14 @@ if __name__ == "__main__":
         print("input_file must be .pkl file")
         exit()
 
-    n_grams = dict()
-    total = 0
-    for sentence in tqdm.tqdm(datas):
-        n_gram = [tuple(sentence[i:i+args.n_gram]) for i in range(len(sentence)+1 - args.n_gram)]
-        for item in n_gram:
-            total += 1
-            if item in n_grams:
-                n_grams[item] += 1
-            else:
-                n_grams[item] = 1
+    ngram_list = [[tuple(sentence[i:i+args.n_gram]) for i in range(len(sentence)+1 - args.n_gram)] for sentence in tqdm.tqdm(datas)]
+    n_grams = {item for sentence in ngram_list for item in sentence}
+    ngram2id = {item:i for i, item in enumerate(n_grams)}
+
+    ngram_vectors = torch.zeros(len(ngram_list), len(n_grams), dtype=torch.float)
+    for i, sentence in enumerate(tqdm.tqdm(ngram_list)):
+        for item in sentence:
+            ngram_vectors[i, ngram2id[item]] += 1.0
 
     with open(args.outputfile, "wb") as f:
-        pickle.dump((n_grams, total), f)
+        pickle.dump((ngram_vectors, ngram2id), f)
