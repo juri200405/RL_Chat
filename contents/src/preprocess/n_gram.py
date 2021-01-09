@@ -23,13 +23,12 @@ if __name__ == "__main__":
 
     ngram_list = [[tuple(sentence[i:i+args.n_gram]) for i in range(len(sentence)+1 - args.n_gram)] for sentence in tqdm.tqdm(datas)]
     del datas
-    n_grams = {item for sentence in ngram_list for item in sentence}
-    ngram2id = {item:i for i, item in enumerate(n_grams)}
+    ngram2id = {tmp:i for i, tmp in enumerate({item for sentence in ngram_list for item in sentence})}
+    num_ngram = len(ngram2id)
 
-    ngram_vectors = torch.zeros(len(ngram_list), len(n_grams), dtype=torch.float)
-    for i, sentence in enumerate(tqdm.tqdm(ngram_list)):
-        for item in sentence:
-            ngram_vectors[i, ngram2id[item]] += 1.0
+    ngram_list = [[ngram2id[item] for item in sentence] for sentence in tqdm.tqdm(ngram_list) if len(sentence) > 0]
+    # ngram_vectors = torch.cat([torch.nn.functional.one_hot(torch.tensor(sentence), num_classes=num_ngram).sum(dim=0, keepdim=True) for sentence in ngram_list], dim=0).float()
 
     with open(args.outputfile, "wb") as f:
-        pickle.dump((ngram_vectors, ngram2id), f)
+        # pickle.dump((ngram_vectors, ngram2id), f)
+        pickle.dump((ngram_list, ngram2id, num_ngram), f)
