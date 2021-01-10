@@ -5,6 +5,7 @@ from pathlib import Path
 import tqdm
 
 import torch
+import numpy as np
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -17,18 +18,24 @@ if __name__ == "__main__":
     if input_file.suffix == ".pkl":
         with open(str(input_file), "rb") as f:
             datas = pickle.load(f)
+    elif input_file.suffix == ".txt":
+        with open(str(input_file), "rt", encoding="utf-8") as f:
+            ngram_list = [[sentence[i:i+args.n_gram] for i in range(len(sentence)+1 - args.n_gram)] for sentence in tqdm.tqdm(f) if len(sentence)>0]
     else:
         print("input_file must be .pkl file")
         exit()
 
-    ngram_list = [[tuple(sentence[i:i+args.n_gram]) for i in range(len(sentence)+1 - args.n_gram)] for sentence in tqdm.tqdm(datas)]
-    del datas
+    if input_file.suffix == ".pkl":
+        ngram_list = [[tuple(sentence[i:i+args.n_gram]) for i in range(len(sentence)+1 - args.n_gram)] for sentence in tqdm.tqdm(datas) if len(sentene)>0]
+        del datas
     ngram2id = {tmp:i for i, tmp in enumerate({item for sentence in ngram_list for item in sentence})}
     num_ngram = len(ngram2id)
 
     ngram_list = [[ngram2id[item] for item in sentence] for sentence in tqdm.tqdm(ngram_list) if len(sentence) > 0]
-    # ngram_vectors = torch.cat([torch.nn.functional.one_hot(torch.tensor(sentence), num_classes=num_ngram).sum(dim=0, keepdim=True) for sentence in ngram_list], dim=0).float()
+    # ngram_vectors = torch.cat([torch.nn.functional.one_hot(torch.tensor(sentence), num_classes=num_ngram).sum(dim=0, keepdim=True) for sentence in tqdm.tqdm(ngram_list)], dim=0).float()
+    eye = np.eye(num_ngram)
+    ngram_vectors = np.stack([eye[sentence].sum(axis=0) for sentence in tqdm.tqdm(ngram_list)])
 
     with open(args.outputfile, "wb") as f:
-        # pickle.dump((ngram_vectors, ngram2id), f)
-        pickle.dump((ngram_list, ngram2id, num_ngram), f)
+        pickle.dump((ngram_vectors, ngram2id, num_ngram), f)
+        # pickle.dump((ngram_list, ngram2id, num_ngram), f)
