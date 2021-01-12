@@ -15,8 +15,6 @@ if __name__ == "__main__":
     parser.add_argument("--ngram_list", default=None)
     parser.add_argument("--outputdir", required=True)
     parser.add_argument("--n_gram", type=int, default=3)
-    parser.add_argument("--sp_num", type=int, default=1000)
-    parser.add_argument("--vector", action='store_true')
     args = parser.parse_args()
 
     output_path = Path(args.outputdir)
@@ -53,11 +51,10 @@ if __name__ == "__main__":
         print("incorrect options")
         exit()
 
-    if args.vector:
-        random.shuffle(ngram_list)
-        sp_num = args.sp_num
-        sp = math.ceil(len(ngram_list) / sp_num)
-        for i in tqdm.trange(sp):
-            ngram_vectors = torch.cat([torch.nn.functional.one_hot(torch.tensor(sentence), num_classes=num_ngram).sum(dim=0, keepdim=True) for sentence in tqdm.tqdm(ngram_list[i*sp_num : (i+1)*sp_num])], dim=0).float()
-            torch.save(ngram_vectors, str(output_path/"{:05d}.pt".format(i)))
-            del ngram_vectors
+    sum_ngram = torch.zeros(1, num_ngram)
+    for sentence in tqdm.tqdm(ngram_list):
+        sum_ngram = sum_ngram + torch.nn.functional.one_hot(torch.tensor(sentence), num_classes=num_ngram).sum(dim=0, keepdim=True)
+    torch.save(sum_ngram, str(output_path/"sum_ngram.pt"))
+    cos = torch.nn.CosineSimilarity()
+    cos_list = [cos(sum_ngram, torch.nn.functional.one_hot(torch.tensor(sentence), num_classes=num_ngram).sum(dim=0, keepdim=True)) for sentence in tqdm.tqdm(ngram_list)]
+    print(min(cos_list))
