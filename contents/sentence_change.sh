@@ -1,7 +1,7 @@
 #! /bin/bash
 
 ~/conda/envs/pl/bin/python	src/sentence_change.py \
-	--output_dir data/output/sentence_change/2021_01_15/2/ \
+	--output_dir data/output/sentence_change/2021_01_15/3/ \
 	--vae_checkpoint data/tomioka/output/transformer_vae/2020_12_26/1/epoch000.pt \
 	--input_file data/tomioka/no_kwdlc_126.pkl \
 	--spm_model data/tomioka/spm_model/no_kwdlc.model \
@@ -15,8 +15,8 @@
 	--discount 0.0 \
 	--initial_log_alpha 0.0 \
 	--activation sigmoid \
-	--reward_type char_len_reward \
+	--reward_type token_len_reward \
 	--additional_reward none \
 	--additional_reward_rate 0.7 \
-	--target_len 30 \
+	--target_len 10 \
 	# --ngram_file data/tomioka/no_kwdlc_3gram.pkl \

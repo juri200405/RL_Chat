@@ -104,7 +104,7 @@ class VAE_tester:
 
                 if beam_scorer.is_done:
                     break
-            decoded = beam_scorer.finalize(tgt, beam_scores, next_tokens, next_indices, pad_token_id=3, eos_token_id=2)
+            decoded = beam_scorer.finalize(tgt, beam_scores, next_tokens, next_indices, pad_token_id=3, eos_token_id=2)["sequences"]
         return decoded.cpu().tolist()
 
     def beam_generate(self, memory, num_beams):
