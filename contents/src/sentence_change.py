@@ -41,7 +41,7 @@ class Environment():
     def manual_reward(self, utt):
         print(utt)
         r = -1.0
-        while r < 0 or r > 1:
+        while r < 0.0 or r > 1.0:
             try:
                 r = float(input("reward (0 <= r <= 1) : "))
             except ValueError:
@@ -62,11 +62,11 @@ class Environment():
     def corpus_bleu(self, text):
         return bleu_score.sentence_bleu([list(item) for item in random.sample(self.datas, 100)], list(text), smoothing_function=bleu_score.SmoothingFunction().method1)
 
-    def charlen_reward(self, text):
+    def len_reward(self, text):
         if len(text) == self.target_len:
-            return 1
+            return 1.0
         else:
-            return 0
+            return 0.0
 
     def calc_reward(self, state, action, state_ids):
         input_utt = self.tester.sp.decode(state_ids)
@@ -85,6 +85,10 @@ class Environment():
             pre = self.corpus_ngram_reward(ids, True)
         elif self.reward_type == "corpus_bleu":
             pre = self.corpus_bleu(utt)
+        elif self.reward_type == "char_len_reward":
+            pre = self.len_reward(utt)
+        elif self.reward_type == "token_len_reward":
+            pre = self.len_reward(ids)
         data_dict = {"utterance": utt, "pre": pre, "epoch": epoch, "step": step, "input": input_utt}
 
         if self.additional_reward == "none":
@@ -143,13 +147,18 @@ if __name__ == "__main__":
     parser.add_argument("--discount", type=float, default=0.99)
     parser.add_argument("--initial_log_alpha", type=float, default=1e-4)
     parser.add_argument("--activation", choices=["sqrt", "sigmoid", "none", "tanh"], default="none")
-    parser.add_argument("--reward_type", choices=["manual", "reward_model", "corpus_ngram", "weighted_corpus_ngram", "corpus_bleu"], default="corpus_ngram")
+    parser.add_argument(
+            "--reward_type",
+            choices=["manual", "reward_model", "corpus_ngram", "weighted_corpus_ngram", "corpus_bleu", "char_len_reward", "token_len_reward"],
+            default="corpus_ngram"
+            )
     parser.add_argument(
             "--additional_reward",
-            choices=["none", "state_action_id_bleu", "state_action_char_bleu", "pos_state_action_cos", "neg_state_action_cos", "char_len_reward", "token_len_reward"],
+            choices=["none", "state_action_id_bleu", "state_action_char_bleu", "pos_state_action_cos", "neg_state_action_cos"],
             default="none"
             )
     parser.add_argument("--additional_reward_rate", type=float, default=0.5)
+    parser.add_argument("--target_len", type=int, default=-1)
     args = parser.parse_args()
 
     writer = SummaryWriter(log_dir=args.output_dir)
@@ -219,7 +228,22 @@ if __name__ == "__main__":
             datas = [item.strip() for item in f if len(item.strip())>0]
     else:
         datas = None
-    env = Environment(tester, args.reward_type, args.additional_reward, args.additional_reward_rate, reward_model=reward_model, corpus_ngram=corpus_ngram, datas=datas)
+
+    if (args.target_len > 0) and (args.reward_type in ["char_len_reward", "token_len_reward"]):
+        target_len = args.target_len
+    else:
+        target_len = None
+
+    env = Environment(
+            tester,
+            args.reward_type,
+            args.additional_reward,
+            args.additional_reward_rate,
+            reward_model=reward_model,
+            corpus_ngram=corpus_ngram,
+            datas=datas,
+            target_len=target_len
+            )
 
     data = []
     memory = []
