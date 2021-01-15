@@ -32,6 +32,8 @@ class Environment():
             self.datas = datas
         elif reward_type in ["char_len_reward", "token_len_reward"]:
             self.target_len = target_len
+        elif reward_type == "repeat_reward":
+            self.repeatedly = re.compile(r"(.+)\1{3}")
 
         self.additional_reward = additional_reward
         if additional_reward in ["pos_state_action_cos", "neg_state_action_cos"]:
@@ -68,6 +70,12 @@ class Environment():
         else:
             return 0.0
 
+    def repeat_reward(self, utt):
+        if self.repeatedly.search(utt) is not None:
+            return 0.0
+        else:
+            return 1.0
+
     def calc_reward(self, state, action, state_ids):
         input_utt = self.tester.sp.decode(state_ids)
         ids = self.tester.beam_generate_ids(action, 5)[0]
@@ -89,6 +97,8 @@ class Environment():
             pre = self.len_reward(utt)
         elif self.reward_type == "token_len_reward":
             pre = self.len_reward(ids)
+        elif self.reward_type == "repeat_reward":
+            pre = self.repeat_reward(utt)
         data_dict = {"utterance": utt, "pre": pre, "epoch": epoch, "step": step, "input": input_utt}
 
         if self.additional_reward == "none":
@@ -149,7 +159,7 @@ if __name__ == "__main__":
     parser.add_argument("--activation", choices=["sqrt", "sigmoid", "none", "tanh"], default="none")
     parser.add_argument(
             "--reward_type",
-            choices=["manual", "reward_model", "corpus_ngram", "weighted_corpus_ngram", "corpus_bleu", "char_len_reward", "token_len_reward"],
+            choices=["manual", "reward_model", "corpus_ngram", "weighted_corpus_ngram", "corpus_bleu", "char_len_reward", "token_len_reward", "repeat_reward"],
             default="corpus_ngram"
             )
     parser.add_argument(
