@@ -19,8 +19,7 @@ from dataloader import get_dataloader
 from is_in_corpus import MyModel
 
 class Environment():
-    def __init__(self, tester, reward_type, additional_reward, reward_model=None, corpus_ngram=None):
-        self.history_list = []
+    def __init__(self, tester, reward_type, additional_reward, additional_reward_rate, reward_model=None, corpus_ngram=None, datas=None, target_len=None):
         self.tester = tester
 
         self.reward_type = reward_type
@@ -29,13 +28,15 @@ class Environment():
         elif reward_type in ["corpus_ngram", "weighted_corpus_ngram"]:
             self.corpus_ngram = corpus_ngram
             self.max_ngrams = max(corpus_ngram.values())
+        elif reward_type == "corpus_bleu":
+            self.datas = datas
+        elif reward_type in ["char_len_reward", "token_len_reward"]:
+            self.target_len = target_len
 
         self.additional_reward = additional_reward
         if additional_reward in ["pos_state_action_cos", "neg_state_action_cos"]:
             self.cos = torch.nn.CosineSimilarity(dim=1)
-
-    def reset(self):
-        self.history_list.clear()
+        self.additional_reward_rate = additional_reward_rate
 
     def manual_reward(self, utt):
         print(utt)
@@ -58,12 +59,23 @@ class Environment():
                     score += 1.0
         return (score / len(n_gram)) if len(n_gram) > 0 else 0.0
 
+    def corpus_bleu(self, text):
+        return bleu_score.sentence_bleu([list(item) for item in random.sample(self.datas, 100)], list(text), smoothing_function=bleu_score.SmoothingFunction().method1)
+
+    def charlen_reward(self, text):
+        if len(text) == self.target_len:
+            return 1
+        else:
+            return 0
+
     def calc_reward(self, state, action, state_ids):
         input_utt = self.tester.sp.decode(state_ids)
         ids = self.tester.beam_generate_ids(action, 5)[0]
         utt = self.tester.sp.decode(ids)
 
-        if self.reward_type == "manual":
+        if input_utt == utt:
+            pre = 0
+        elif self.reward_type == "manual":
             pre = self.manual_reward(utt)
         elif self.reward_type == "reward_model":
             pre = self.reward_model(action).item()
@@ -71,6 +83,8 @@ class Environment():
             pre = self.corpus_ngram_reward(ids, False)
         elif self.reward_type == "weighted_corpus_ngram":
             pre = self.corpus_ngram_reward(ids, True)
+        elif self.reward_type == "corpus_bleu":
+            pre = self.corpus_bleu(utt)
         data_dict = {"utterance": utt, "pre": pre, "epoch": epoch, "step": step, "input": input_utt}
 
         if self.additional_reward == "none":
@@ -92,7 +106,7 @@ class Environment():
         elif self.additional_reward == "pos_state_action_cos":
             cs = self.cos(state, action).item() / 2 + 0.5
             data_dict["cos"] = cs
-            reward = 0.5*pre + 0.5*cs
+            reward = (1-self.additional_reward_rate)*pre + self.additional_reward_rate*cs
         elif self.additional_reward == "neg_state_action_cos":
             cs = self.cos(state, action).item() / 2 + 0.5
             data_dict["cos"] = cs
@@ -119,6 +133,7 @@ if __name__ == "__main__":
     parser.add_argument("--input_file", required=True)
     parser.add_argument("--reward_checkpoint", default=None)
     parser.add_argument("--ngram_file", default=None)
+    parser.add_argument("--datas_file", default=None)
     parser.add_argument("--mid_size", type=int, default=1024)
     parser.add_argument("--num_experiment", type=int, default=10)
     parser.add_argument("--num_epoch", type=int, default=10)
@@ -128,8 +143,13 @@ if __name__ == "__main__":
     parser.add_argument("--discount", type=float, default=0.99)
     parser.add_argument("--initial_log_alpha", type=float, default=1e-4)
     parser.add_argument("--activation", choices=["sqrt", "sigmoid", "none", "tanh"], default="none")
-    parser.add_argument("--reward_type", choices=["manual", "reward_model", "corpus_ngram", "weighted_corpus_ngram"], default="corpus_ngram")
-    parser.add_argument("--additional_reward", choices=["none", "state_action_id_bleu", "state_action_char_bleu", "pos_state_action_cos", "neg_state_action_cos"], default="none")
+    parser.add_argument("--reward_type", choices=["manual", "reward_model", "corpus_ngram", "weighted_corpus_ngram", "corpus_bleu"], default="corpus_ngram")
+    parser.add_argument(
+            "--additional_reward",
+            choices=["none", "state_action_id_bleu", "state_action_char_bleu", "pos_state_action_cos", "neg_state_action_cos", "char_len_reward", "token_len_reward"],
+            default="none"
+            )
+    parser.add_argument("--additional_reward_rate", type=float, default=0.5)
     args = parser.parse_args()
 
     writer = SummaryWriter(log_dir=args.output_dir)
@@ -193,7 +213,13 @@ if __name__ == "__main__":
             corpus_ngram, total_ngrams = pickle.load(f)
     else:
         corpus_ngram = None
-    env = Environment(tester, args.reward_type, args.additional_reward, reward_model=reward_model, corpus_ngram=corpus_ngram)
+
+    if (args.datas_file is not None) and (args.reward_type == "corpus_bleu"):
+        with open(args.datas_file, "rt", encoding="utf-8") as f:
+            datas = [item.strip() for item in f if len(item.strip())>0]
+    else:
+        datas = None
+    env = Environment(tester, args.reward_type, args.additional_reward, args.additional_reward_rate, reward_model=reward_model, corpus_ngram=corpus_ngram, datas=datas)
 
     data = []
     memory = []
@@ -275,7 +301,6 @@ if __name__ == "__main__":
             memory.append(memory_dict)
 
             writer.add_scalar("experiment/total_reward", rewards, epoch)
-            env.reset()
 
         torch.save(agent.state_dict(), str(Path(args.output_dir)/"epoch{:05d}.pt".format(epoch)))
         with open(str(Path(args.output_dir)/"history_{:05d}.json".format(epoch)), "wt", encoding="utf-8") as f:
