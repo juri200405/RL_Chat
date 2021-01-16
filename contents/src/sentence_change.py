@@ -168,7 +168,17 @@ if __name__ == "__main__":
     parser.add_argument("--activation", choices=["sqrt", "sigmoid", "none", "tanh"], default="none")
     parser.add_argument(
             "--reward_type",
-            choices=["manual", "reward_model", "corpus_ngram", "weighted_corpus_ngram", "corpus_bleu", "char_len_reward", "token_len_reward", "repeat_reward"],
+            choices=[
+                "manual",
+                "reward_model",
+                "corpus_ngram",
+                "weighted_corpus_ngram",
+                "corpus_bleu",
+                "char_len_reward",
+                "token_len_reward",
+                "repeat_reward",
+                "sentence_head_reward"
+                ],
             default="corpus_ngram"
             )
     parser.add_argument(
