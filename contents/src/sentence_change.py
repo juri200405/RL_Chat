@@ -33,7 +33,7 @@ class Environment():
         elif reward_type in ["char_len_reward", "token_len_reward"]:
             self.target_len = target_len
         elif reward_type == "repeat_reward":
-            self.repeatedly = re.compile(r"(.+)\1{3}")
+            self.repeatedly = re.compile(r"(.+)\1{2}")
         elif reward_type == "sentence_head_reward":
             self.head = re.compile(r"私は")
 
