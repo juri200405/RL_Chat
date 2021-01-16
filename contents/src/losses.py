@@ -48,7 +48,7 @@ class MmdLoss:
         return torch.exp(-kernel_input) # (x_size, y_size)
 
     def forward(self, out, label, x):
-        y = torch.randn(256, self.n_latent, device=self.device)
+        y = torch.randn(256, self.n_latent, device=self.device).tanh()
         xx_kernel = self.kernel(x, x)
         yy_kernel = self.kernel(y, y)
         xy_kernel = self.kernel(x, y)
