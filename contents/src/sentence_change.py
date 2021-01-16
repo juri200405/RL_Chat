@@ -19,7 +19,19 @@ from dataloader import get_dataloader
 from is_in_corpus import MyModel
 
 class Environment():
-    def __init__(self, tester, reward_type, additional_reward, additional_reward_rate, reward_model=None, corpus_ngram=None, datas=None, target_len=None):
+    def __init__(
+            self,
+            tester,
+            reward_type,
+            additional_reward,
+            additional_reward_rate,
+            reward_model=None,
+            corpus_ngram=None,
+            datas=None,
+            target_len=None,
+            low=None,
+            high=None
+            ):
         self.tester = tester
 
         self.reward_type = reward_type
@@ -32,6 +44,9 @@ class Environment():
             self.datas = datas
         elif reward_type in ["char_len_reward", "token_len_reward"]:
             self.target_len = target_len
+        elif reward_type in ["char_len_range_reward", "token_len_range_reward"]:
+            self.low = low
+            self.high = high
         elif reward_type == "repeat_reward":
             self.repeatedly = re.compile(r"(.+)\1{2}")
         elif reward_type == "sentence_head_reward":
@@ -72,6 +87,12 @@ class Environment():
         else:
             return 0.0
 
+    def len_range_reward(self, text):
+        if len(text) < self.low or len(text) > self.high:
+            return 0.0
+        else:
+            return 1.0
+
     def repeat_reward(self, utt):
         if self.repeatedly.search(utt) is not None:
             return 0.0
@@ -104,6 +125,10 @@ class Environment():
             pre = self.len_reward(utt)
         elif self.reward_type == "token_len_reward":
             pre = self.len_reward(ids)
+        elif self.reward_type == "char_len_range_reward":
+            pre = self.len_range_reward(utt)
+        elif self.reward_type == "token_len_range_reward":
+            pre = self.len_range_reward(ids)
         elif self.reward_type == "repeat_reward":
             pre = self.repeat_reward(utt)
         elif self.reward_type == "sentence_head_reward":
@@ -177,7 +202,9 @@ if __name__ == "__main__":
                 "char_len_reward",
                 "token_len_reward",
                 "repeat_reward",
-                "sentence_head_reward"
+                "sentence_head_reward",
+                "char_len_range_reward",
+                "token_len_range_reward"
                 ],
             default="corpus_ngram"
             )
@@ -188,6 +215,8 @@ if __name__ == "__main__":
             )
     parser.add_argument("--additional_reward_rate", type=float, default=0.5)
     parser.add_argument("--target_len", type=int, default=-1)
+    parser.add_argument("--low", type=int, default=-1)
+    parser.add_argument("--high", type=int, default=-1)
     args = parser.parse_args()
 
     writer = SummaryWriter(log_dir=args.output_dir)
@@ -233,9 +262,6 @@ if __name__ == "__main__":
             target_entropy=-config.n_latent
             )
 
-    for i in range(100):
-        writer.add_scalar("debug/activation", activation_function(torch.tensor([float(i-50)/10.0])).item(), i)
-
     with open(str(Path(args.output_dir)/"arguments.json"), "wt", encoding="utf-8") as f:
         json.dump(vars(args), f, indent=2, ensure_ascii=False)
 
@@ -263,6 +289,13 @@ if __name__ == "__main__":
     else:
         target_len = None
 
+    if (args.low > 0) and (args.high > 0) and (args.reward_type in ["char_len_range_reward", "token_len_range_reward"]):
+        low = args.low
+        high = args.high
+    else:
+        low = None
+        high = None
+
     env = Environment(
             tester,
             args.reward_type,
@@ -271,7 +304,9 @@ if __name__ == "__main__":
             reward_model=reward_model,
             corpus_ngram=corpus_ngram,
             datas=datas,
-            target_len=target_len
+            target_len=target_len,
+            low=low,
+            high=high
             )
 
     data = []
