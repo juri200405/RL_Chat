@@ -18,19 +18,17 @@ RUN apt update --fix-missing && \
         locales \
         wget \
         ca-certificates \
-        git \
-        make \
-        curl \
-        xz-utils \
-        file \
-        sudo \
-        net-tools \
 	graphviz \
+	mecab \
+	libmecab-dev \
+	mecab-ipadic-utf8 \
         && \
     apt autoremove && \
     rm -rf /var/lib/apt/lists/* && \
     apt clean && \
     localedef -i ja_JP -c -f UTF-8 -A /usr/share/locale/locale.alias ja_JP.UTF-8
+
+RUN cp /etc/mecabrc /usr/local/etc/
 
 # user作成
 # uid,gid,usernameはホストのものにする
@@ -62,9 +60,4 @@ COPY ./environment.yml ./
 RUN conda env create -f environment.yml
 RUN echo "conda activate pl" >> ~/.bashrc
 
-# RUN conda activate pl
-# RUN git clone https://github.com/NVIDIA/apex
-# RUN pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./apex
-
 ENV PYTHONPATH src:torchviz
-ENV LRU_CACHE_CAPACITY 1
