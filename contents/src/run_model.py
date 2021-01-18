@@ -229,7 +229,7 @@ class Trainer:
             self.writer.add_scalar('val/mmd',np.mean(mmd_items), self.num_val)
 
             memorys = torch.cat(memorys, dim=0)
-            memorys = torch.cat((memorys, torch.randn(1024, self.config.n_latent)), dim=0)
+            memorys = torch.cat((memorys, torch.randn(1024, self.config.n_latent).tanh()), dim=0)
             sentences = self.sp.decode(torch.cat(sentences, dim=0).tolist())
             sentences += (["<RAND>"] * 1024)
             self.writer.add_embedding(memorys, metadata=sentences, global_step=self.num_val)
@@ -243,7 +243,7 @@ class Trainer:
             memory = self.encoder(input_s, attention_mask=inp_mask)
 
             ids = self.generate_sentence(memory.to(self.config.device))
-            rand_ids = self.generate_sentence(torch.randn(1, self.config.n_latent, device=self.config.device))
+            rand_ids = self.generate_sentence(torch.randn(1, self.config.n_latent, device=self.config.device).tanh())
 
         self.num_val += 1
         return data, ids[0], rand_ids[0]

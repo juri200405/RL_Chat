@@ -37,15 +37,18 @@ class VAE_tester:
 
     def encode(self, sentence):
         data = self.sp.encode(sentence)[:self.config.max_len-2]
+        return self.encode_from_ids(data)
+
+    def encode_from_ids(self, ids):
         with torch.no_grad():
-            input_s = torch.tensor([1] + data + [2]).unsqueeze(0)
+            input_s = torch.tensor([1] + ids + [2]).unsqueeze(0)
             inp_mask = torch.tensor([[False]*input_s.shape[1] + [True]*(self.config.max_len - input_s.shape[1])])
             pad = torch.full((1, self.config.max_len - input_s.shape[1]), 3, dtype=torch.long)
             input_s = torch.cat((input_s, pad), dim=1)
             memory = self.encoder(input_s.to(self.device), attention_mask=inp_mask.to(self.device))
         return memory
 
-    def generate(self, memory):
+    def generate_ids(self, memory):
         with torch.no_grad():
             tgt = torch.full((memory.shape[0], 1), 1, dtype=torch.long, device=self.device)  # <s>
             unfinish = torch.ones(memory.shape[0], 1, dtype=torch.long, device=self.device)
@@ -59,9 +62,13 @@ class VAE_tester:
                 unfinish = unfinish * (~(next_word == 2)).long()
                 if unfinish.max() == 0: # </s>
                     break
-        return self.sp.decode(tgt.cpu().tolist())
+        return tgt.cpu().tolist()
 
-    def beam_generate(self, memory, num_beams):
+    def generate(self, memory):
+        ids = self.generate_ids(memory)
+        return self.sp.decode(ids)
+
+    def beam_generate_ids(self, memory, num_beams):
         batch_size = memory.shape[0]
         vocab_size = self.config.n_vocab
         beam_scorer = transformers.BeamSearchScorer(batch_size=batch_size, max_length=self.config.max_len, num_beams=num_beams, device=self.device)
@@ -97,8 +104,12 @@ class VAE_tester:
 
                 if beam_scorer.is_done:
                     break
-            decoded = beam_scorer.finalize(tgt, beam_scores, next_tokens, next_indices, pad_token_id=3, eos_token_id=2)
-        return self.sp.decode(decoded.cpu().tolist())
+            decoded = beam_scorer.finalize(tgt, beam_scores, next_tokens, next_indices, pad_token_id=3, eos_token_id=2)["sequences"]
+        return decoded.cpu().tolist()
+
+    def beam_generate(self, memory, num_beams):
+        ids = self.beam_generate_ids(memory, num_beams)
+        return self.sp.decode(ids)
 
     def reconstract(self, sentence):
         memory = self.encode(sentence)
