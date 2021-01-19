@@ -81,6 +81,24 @@ def norm_rate_reward():
         return len(intersection)/len(union) if len(union)>0 else 1.0
     return _f
 
+def token_bleu_score(sp):
+    def _f(state_ids, state_utt, action_ids, action_utt):
+        return bleu_score.sentence_bleu(
+                [[sp.id_to_piece(item) for item in state_ids]],
+                [sp.id_to_piece(item) for item in action_ids],
+                smoothing_function=bleu_score.SmoothingFunction().method1,
+                weights=(0.5, 0.5)
+                )
+
+def char_bleu_score():
+    def _f(state_ids, state_utt, action_ids, action_utt):
+        return bleu_score.sentence_bleu(
+                [list(state_utt)],
+                list(action_utt),
+                smoothing_function=bleu_score.SmoothingFunction().method1,
+                weights=(0.5, 0.5)
+                )
+
 class Environment():
     def __init__(
             self,
@@ -132,6 +150,8 @@ if __name__ == "__main__":
                 "repeat_reward",
                 "norm_bleu_reward",
                 "norm_rate_reward",
+                "token_bleu_reward",
+                "char_bleu_reward",
                 ],
             )
     parser.add_argument("--reward_weight", type=int, nargs='*', default=[])
@@ -159,6 +179,7 @@ if __name__ == "__main__":
 
     with open(args.input_file, "rb") as f:
         corpus_datas = pickle.load(f)
+    corpus_datas = [item for item in corpus_datas if len(item)>0]
 
     agent = Agent(
             torch.nn.Sigmoid(),
@@ -197,6 +218,10 @@ if __name__ == "__main__":
             func = norm_bleu_reward()
         elif r_type == "norm_rate_reward":
             func = norm_rate_reward()
+        elif r_type == "token_bleu_reward":
+            func = token_bleu_reward(sp)
+        elif r_type == "char_bleu_reward":
+            func = char_bleu_reward()
 
         reward_funcs.append((r_type, func, r_weight))
 
@@ -212,8 +237,8 @@ if __name__ == "__main__":
     for epoch in range(args.num_epoch):
         if len(memory) > 0:
             print("*** #{} learn from memory ***".format(epoch))
-            sample = random.sample(memory, min(64*args.training_num, len(memory)))
-            dataloader = get_dataloader(sample, 64, use_hidden=False)
+            sample = random.sample(memory, min(128*args.training_num, len(memory)))
+            dataloader = get_dataloader(sample, 128, use_hidden=False)
             agent.train()
             for batch in dataloader:
                 graph = True if i ==0 else False
@@ -275,7 +300,7 @@ if __name__ == "__main__":
             memory_dict["is_final"] = torch.tensor([1.0])
             memory.append(memory_dict)
 
-            writer.add_scalar("experiment/total_reward", rewards, epoch)
+            writer.add_scalar("experiment/average_reward", rewards/args.num_experiment, epoch)
 
         with open(str(Path(args.output_dir)/"history_{:05d}.json".format(epoch)), "wt", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
