@@ -11,6 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 import sentencepiece as spm
 from nltk import bleu_score
 from torchviz import make_dot
+from MeCab import Tagger
 
 from vae_check import VAE_tester
 from config import Config
@@ -19,8 +20,8 @@ from dataloader import get_dataloader
 from is_in_corpus import MyModel
 
 def manual_reward():
-    def _f(ids, utt):
-        print(utt)
+    def _f(state_ids, state_utt, action_ids, action_utt):
+        print(action_utt)
         r = -1.0
         while r < 0.0 or r > 1.0:
             try:
@@ -34,14 +35,14 @@ def len_reward(target_len, len_range=0, token=True):
     low = target_len - len_range
     high = target_len + len_range
     if token:
-        def _f(ids, utt):
-            if len(ids) < low or len(ids) > high:
+        def _f(state_ids, state_utt, action_ids, action_utt):
+            if len(action_ids) < low or len(action_ids) > high:
                 return 0.0
             else:
                 return 1.0
     else:
-        def _f(ids, utt):
-            if len(utt) < low or len(utt) > high:
+        def _f(state_ids, state_utt, action_ids, action_utt):
+            if len(action_utt) < low or len(action_utt) > high:
                 return 0.0
             else:
                 return 1.0
@@ -49,11 +50,22 @@ def len_reward(target_len, len_range=0, token=True):
 
 def repeat_reward(repeat_num=3):
     repeatedly = re.compile(r"(.+)\1{{{}}}".format(repeat_num-1))
-    def _f(ids, utt):
-        if repeatedly.search(utt) is not None:
+    def _f(state_ids, state_utt, action_ids, action_utt):
+        if repeatedly.search(action_utt) is not None:
             return 0.0
         else:
             return 1.0
+    return _f
+
+def norm_bleu_reward():
+    m = Tagger()
+    def norm_list(utt):
+        return [word for word, w_type in [tuple(item.split('\t')) for item in m.parse(utt).strip().split('\n') if item!="EOS"] if w_type.split(',')[0]=="名詞"]
+
+    def _f(state_ids, state_utt, action_ids, action_utt):
+        state_norm = norm_list(state_utt)
+        action_norm = norm_list(action_utt)
+        return bleu_score.sentence_bleu([state_norm], action_norm, smoothing_function=bleu_score.SmoothingFunction().method1, weights=(0.5, 0.5))
     return _f
 
 class Environment():
@@ -66,17 +78,17 @@ class Environment():
         self.reward_funcs = reward_funcs
 
     def calc_reward(self, state, action, state_ids):
-        input_utt = self.tester.sp.decode(state_ids)
-        ids = self.tester.beam_generate_ids(action, 5)[0]
-        utt = self.tester.sp.decode(ids)
+        state_utt = self.tester.sp.decode(state_ids)
+        action_ids = self.tester.beam_generate_ids(action, 5)[0]
+        action_utt = self.tester.sp.decode(action_ids)
 
-        data_dict = {"utterance": utt, "epoch": epoch, "step": step, "input": input_utt}
-        if input_utt == utt:
+        data_dict = {"utterance": action_utt, "epoch": epoch, "step": step, "input": state_utt}
+        if state_utt == action_utt:
             reward = 0.0
         else:
             reward = 0.0
             for r_type, func, weight in self.reward_funcs:
-                f_reward = func(ids, utt) * weight
+                f_reward = func(state_ids, state_utt, action_ids, action_utt) * weight
                 data_dict[r_type] = f_reward
                 reward += f_reward
 
@@ -106,6 +118,7 @@ if __name__ == "__main__":
                 "char_len_reward",
                 "token_len_reward",
                 "repeat_reward",
+                "norm_bleu_reward"
                 ],
             )
     parser.add_argument("--reward_weight", type=int, nargs='*', default=[])
@@ -166,7 +179,9 @@ if __name__ == "__main__":
         elif r_type == "token_len_reward":
             func = len_reward(args.target_len, len_range=args.target_range, token=True)
         elif r_type == "repeat_reward":
-            func = repeat_reward(repeat_num=args.repeat_reward)
+            func = repeat_reward(repeat_num=args.repeat_num)
+        elif r_type == "norm_bleu_reward":
+            func = norm_bleu_reward()
 
         reward_funcs.append((r_type, func, r_weight))
 
