@@ -247,7 +247,9 @@ if __name__ == "__main__":
 
             writer.add_scalar("experiment/total_reward", rewards, epoch)
 
-        torch.save(agent.state_dict(), str(Path(args.output_dir)/"epoch{:05d}.pt".format(epoch)))
         with open(str(Path(args.output_dir)/"history_{:05d}.json".format(epoch)), "wt", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         data.clear()
+        if epoch % 1000 == 0:
+            torch.save(agent.state_dict(), str(Path(args.output_dir)/"epoch{:02d}k.pt".format(epoch//1000)))
+    torch.save(agent.state_dict(), str(Path(args.output_dir)/"final.pt"))
