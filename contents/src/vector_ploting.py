@@ -15,7 +15,7 @@ if __name__ == "__main__":
 
     sp = spm.SentencePieceProcessor(model_file="data/tomioka/spm_model/no_kwdlc.model")
     config = Config()
-    config.load_json("data/tomioka/output/transformer_vae/2020_12_26/1/hyper_param.json")
+    config.load_json("data/tomioka/output/transformer_vae/2021_01_17/1/hyper_param.json")
     config.dropout = 0.0
 
     device = torch.device("cuda", 0)
@@ -29,14 +29,15 @@ if __name__ == "__main__":
 
     encoder.load_state_dict(
             torch.load(
-                "data/tomioka/output/transformer_vae/2020_12_26/1/epoch001.pt",
+                "data/tomioka/output/transformer_vae/2021_01_17/1/epoch001.pt",
                 map_location=device
                 )["encoder_state_dict"]
             )
 
+    data_num = 1000000
     data_loader = get_dataloader(
-            sp.encode(datas),
-            16384,
+            sp.encode(random.sample(datas, data_num)),
+            data_num//1000,
             pad_index=3,
             bos_index=1,
             eos_index=2,
@@ -48,6 +49,8 @@ if __name__ == "__main__":
     for sentence, mask in tqdm.tqdm(data_loader):
         sentence = sentence.to(device)
         mask = mask.to(device)
+        with open("data/tomioka/output/z/tensors.tsv", "at", encoding="utf-8") as f:
+            f.write("\n".join(["\t".join([str(item) for item in s]) for s in encoder(sentence, attention_mask=mask).cpu().tolist()]) + '\n')
 
-        with open("data/output/z/tensors.tsv", "at", encoding="utf-8") as f:
-            f.write("\n".join(["\t".join([str(item) for item in sentence]) for sentence in encoder(sentence, attention_mask=mask).cpu().tolist()]))
+    with open("data/tomioka/output/z/randn.tsv", "wt", encoding="utf-8") as f:
+        f.write("\n".join(["\t".join([str(item) for item in sentence]) for sentence in torch.randn(data_num, 2).tanh().tolist()]))
