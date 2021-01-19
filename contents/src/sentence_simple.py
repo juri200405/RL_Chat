@@ -89,7 +89,6 @@ if __name__ == "__main__":
     parser.add_argument("--vae_checkpoint", required=True)
     parser.add_argument("--spm_model", required=True)
     parser.add_argument("--input_file", required=True)
-    parser.add_argument("--reward_checkpoint", default=None)
     parser.add_argument("--mid_size", type=int, default=1024)
     parser.add_argument("--num_experiment", type=int, default=10)
     parser.add_argument("--num_epoch", type=int, default=10)
