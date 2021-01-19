@@ -68,6 +68,19 @@ def norm_bleu_reward():
         return bleu_score.sentence_bleu([state_norm], action_norm, smoothing_function=bleu_score.SmoothingFunction().method1, weights=(0.5, 0.5))
     return _f
 
+def norm_rate_reward():
+    m = Tagger()
+    def norm_set(utt):
+        return {word for word, w_type in [tuple(item.split('\t')) for item in m.parse(utt).strip().split('\n') if item!="EOS"] if w_type.split(',')[0]=="名詞"}
+
+    def _f(state_ids, state_utt, action_ids, action_utt):
+        state_norm = norm_set(state_utt)
+        action_norm = norm_set(action_utt)
+        union = state_norm | action_norm
+        intersection = state_norm & action_norm
+        return len(intersection)/len(union) if len(union)>0 else 1.0
+    return _f
+
 class Environment():
     def __init__(
             self,
@@ -118,7 +131,8 @@ if __name__ == "__main__":
                 "char_len_reward",
                 "token_len_reward",
                 "repeat_reward",
-                "norm_bleu_reward"
+                "norm_bleu_reward",
+                "norm_rate_reward",
                 ],
             )
     parser.add_argument("--reward_weight", type=int, nargs='*', default=[])
@@ -182,6 +196,8 @@ if __name__ == "__main__":
             func = repeat_reward(repeat_num=args.repeat_num)
         elif r_type == "norm_bleu_reward":
             func = norm_bleu_reward()
+        elif r_type == "norm_rate_reward":
+            func = norm_rate_reward()
 
         reward_funcs.append((r_type, func, r_weight))
 
