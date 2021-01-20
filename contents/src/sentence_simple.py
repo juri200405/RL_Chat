@@ -57,48 +57,31 @@ def repeat_reward(repeat_num=3):
             return 1.0
     return _f
 
-def norm_bleu_reward():
+def norm_rate_reward(state=True):
     m = Tagger()
     def norm_list(utt):
         return [word for word, w_type in [tuple(item.split('\t')) for item in m.parse(utt).strip().split('\n') if item!="EOS"] if w_type.split(',')[0]=="名詞"]
 
-    def _f(state_ids, state_utt, action_ids, action_utt):
-        state_norm = norm_list(state_utt)
-        action_norm = norm_list(action_utt)
-        return bleu_score.sentence_bleu([state_norm], action_norm, smoothing_function=bleu_score.SmoothingFunction().method1, weights=(0.5, 0.5))
-    return _f
+    def count_match(list1, list2):
+        count = 0
+        for item1 in list1:
+            for item2 in list2:
+                if item1 == item2:
+                    count += 1
+                    list2.remove(item2)
+                    break
+        return count
 
-def norm_rate_reward():
-    m = Tagger()
-    def norm_set(utt):
-        return {word for word, w_type in [tuple(item.split('\t')) for item in m.parse(utt).strip().split('\n') if item!="EOS"] if w_type.split(',')[0]=="名詞"}
-
-    def _f(state_ids, state_utt, action_ids, action_utt):
-        state_norm = norm_set(state_utt)
-        action_norm = norm_set(action_utt)
-        union = state_norm | action_norm
-        intersection = state_norm & action_norm
-        return len(intersection)/len(union) if len(union)>0 else 1.0
-    return _f
-
-def token_bleu_score(sp):
-    def _f(state_ids, state_utt, action_ids, action_utt):
-        return bleu_score.sentence_bleu(
-                [[sp.id_to_piece(item) for item in state_ids]],
-                [sp.id_to_piece(item) for item in action_ids],
-                smoothing_function=bleu_score.SmoothingFunction().method1,
-                weights=(0.5, 0.5)
-                )
-    return _f
-
-def char_bleu_score():
-    def _f(state_ids, state_utt, action_ids, action_utt):
-        return bleu_score.sentence_bleu(
-                [list(state_utt)],
-                list(action_utt),
-                smoothing_function=bleu_score.SmoothingFunction().method1,
-                weights=(0.5, 0.5)
-                )
+    if state:
+        def _f(state_ids, state_utt, action_ids, action_utt):
+            state_norm = norm_list(state_utt)
+            action_norm = norm_list(action_utt)
+            return count_match(state_norm, action_norm) / len(state_norm)
+    else:
+        def _f(state_ids, state_utt, action_ids, action_utt):
+            state_norm = norm_list(state_utt)
+            action_norm = norm_list(action_utt)
+            return count_match(action_norm, state_norm) / len(action_norm)
     return _f
 
 def input_len_reward(len_range=0, token=True):
@@ -166,15 +149,13 @@ if __name__ == "__main__":
             nargs='+',
             choices=[
                 "manual",
-                "char_len_reward",
-                "token_len_reward",
                 "repeat_reward",
-                "norm_bleu_reward",
-                "norm_rate_reward",
-                "token_bleu_reward",
-                "char_bleu_reward",
-                "input_char_len_reward",
+                "token_len_reward",
                 "input_token_len_reward",
+                "char_len_reward",
+                "input_char_len_reward",
+                "state_norm_rate_reward",
+                "action_norm_rate_reward",
                 ],
             )
     parser.add_argument("--reward_weight", type=int, nargs='*', default=[])
@@ -231,24 +212,20 @@ if __name__ == "__main__":
     for r_type, r_weight in zip(args.reward_type, reward_weight):
         if r_type == "manual":
             func = manual_reward()
-        elif r_type == "char_len_reward":
-            func = len_reward(args.target_len, len_range=args.target_range, token=False)
-        elif r_type == "token_len_reward":
-            func = len_reward(args.target_len, len_range=args.target_range, token=True)
         elif r_type == "repeat_reward":
             func = repeat_reward(repeat_num=args.repeat_num)
-        elif r_type == "norm_bleu_reward":
-            func = norm_bleu_reward()
-        elif r_type == "norm_rate_reward":
-            func = norm_rate_reward()
-        elif r_type == "token_bleu_reward":
-            func = token_bleu_reward(sp)
-        elif r_type == "char_bleu_reward":
-            func = char_bleu_reward()
-        elif r_type == "input_char_len_reward":
-            func = input_len_reward(len_range=args.target_range, token=False)
+        elif r_type == "token_len_reward":
+            func = len_reward(args.target_len, len_range=args.target_range, token=True)
         elif r_type == "input_token_len_reward":
             func = input_len_reward(len_range=args.target_range, token=True)
+        elif r_type == "char_len_reward":
+            func = len_reward(args.target_len, len_range=args.target_range, token=False)
+        elif r_type == "input_char_len_reward":
+            func = input_len_reward(len_range=args.target_range, token=False)
+        elif r_type == "state_norm_rate_reward":
+            func = norm_rate_reward(True)
+        elif r_type == "action_norm_rate_reward":
+            func = norm_rate_reward(False)
 
         reward_funcs.append((r_type, func, r_weight))
 
