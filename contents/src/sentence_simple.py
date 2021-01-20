@@ -76,12 +76,18 @@ def norm_rate_reward(state=True):
         def _f(state_ids, state_utt, action_ids, action_utt):
             state_norm = norm_list(state_utt)
             action_norm = norm_list(action_utt)
-            return count_match(state_norm, action_norm) / len(state_norm)
+            return count_match(state_norm, action_norm) / len(state_norm) if len(state_norm)>0 else 1.0
     else:
         def _f(state_ids, state_utt, action_ids, action_utt):
             state_norm = norm_list(state_utt)
             action_norm = norm_list(action_utt)
-            return count_match(action_norm, state_norm) / len(action_norm)
+            if len(action_norm) == 0:
+                if len(state_norm) == 0:
+                    return 1.0
+                else:
+                    return 0.0
+            else:
+                return count_match(state_norm, action_norm) / len(action_norm)
     return _f
 
 def input_len_reward(len_range=0, token=True):
