@@ -89,6 +89,7 @@ def token_bleu_score(sp):
                 smoothing_function=bleu_score.SmoothingFunction().method1,
                 weights=(0.5, 0.5)
                 )
+    return _f
 
 def char_bleu_score():
     def _f(state_ids, state_utt, action_ids, action_utt):
@@ -98,6 +99,26 @@ def char_bleu_score():
                 smoothing_function=bleu_score.SmoothingFunction().method1,
                 weights=(0.5, 0.5)
                 )
+    return _f
+
+def input_len_reward(len_range=0, token=True):
+    if token:
+        def _f(state_ids, state_utt, action_ids, action_utt):
+            low = len(state_ids) - len_range
+            high = len(state_ids) + len_range
+            if len(action_ids) < low or len(action_ids) > high:
+                return 0.0
+            else:
+                return 1.0
+    else:
+        def _f(state_ids, state_utt, action_ids, action_utt):
+            low = len(state_utt) - len_range
+            high = len(state_utt) + len_range
+            if len(action_utt) < low or len(action_utt) > high:
+                return 0.0
+            else:
+                return 1.0
+    return _f
 
 class Environment():
     def __init__(
@@ -152,6 +173,8 @@ if __name__ == "__main__":
                 "norm_rate_reward",
                 "token_bleu_reward",
                 "char_bleu_reward",
+                "input_char_len_reward",
+                "input_token_len_reward",
                 ],
             )
     parser.add_argument("--reward_weight", type=int, nargs='*', default=[])
@@ -222,6 +245,10 @@ if __name__ == "__main__":
             func = token_bleu_reward(sp)
         elif r_type == "char_bleu_reward":
             func = char_bleu_reward()
+        elif r_type == "input_char_len_reward":
+            func = input_len_reward(len_range=args.target_range, token=False)
+        elif r_type == "input_token_len_reward":
+            func = input_len_reward(len_range=args.target_range, token=True)
 
         reward_funcs.append((r_type, func, r_weight))
 
