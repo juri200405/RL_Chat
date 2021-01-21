@@ -36,7 +36,7 @@ def len_reward(target_len, len_range=0, token=True):
     high = target_len + len_range
     if token:
         def _f(state_ids, state_utt, action_ids, action_utt):
-            if len(action_ids) < low or len(action_ids) > high:
+            if len(action_ids)-2 < low or len(action_ids)-2 > high:
                 return 0.0
             else:
                 return 1.0
@@ -95,7 +95,7 @@ def input_len_reward(len_range=0, token=True):
         def _f(state_ids, state_utt, action_ids, action_utt):
             low = len(state_ids) - len_range
             high = len(state_ids) + len_range
-            if len(action_ids) < low or len(action_ids) > high:
+            if len(action_ids)-2 < low or len(action_ids)-2 > high:
                 return 0.0
             else:
                 return 1.0
@@ -123,7 +123,14 @@ class Environment():
         action_ids = self.tester.beam_generate_ids(action, 5)[0]
         action_utt = self.tester.sp.decode(action_ids)
 
-        data_dict = {"utterance": action_utt, "epoch": epoch, "step": step, "input": state_utt}
+        data_dict = {
+                "utterance": action_utt,
+                "epoch": epoch,
+                "step": step,
+                "input": state_utt,
+                "action_ids": action_ids,
+                "state_ids": state_ids
+                }
         if state_utt == action_utt:
             reward = 0.0
         else:
